@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="theme-color" content="#0c0c0d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>magnet diary</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Mono:wght@400;500&family=Gochi+Hand&family=Caveat:wght@500;700&family=Kalam&family=Special+Elite&family=VT323&family=Reenie+Beanie&family=Oswald:wght@500;700&family=Rubik+Mono+One&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<!-- shared SVG paint for stickers -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="chrome" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset=".22" stop-color="#d4d6d9"/>
+      <stop offset=".45" stop-color="#7a7e83"/>
+      <stop offset=".62" stop-color="#eef0f1"/>
+      <stop offset=".8" stop-color="#9a9ea3"/>
+      <stop offset="1" stop-color="#5d6166"/>
+    </linearGradient>
+    <linearGradient id="chromeRose" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fff4f8"/>
+      <stop offset=".3" stop-color="#e8b9cc"/>
+      <stop offset=".55" stop-color="#a86f88"/>
+      <stop offset=".72" stop-color="#f5d6e3"/>
+      <stop offset="1" stop-color="#8e5670"/>
+    </linearGradient>
+    <filter id="felt" x="-5%" y="-5%" width="110%" height="110%">
+      <feTurbulence type="fractalNoise" baseFrequency="1.4" numOctaves="2" seed="4" result="n"/>
+      <feColorMatrix in="n" type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .55 -.1" result="w"/>
+      <feComposite in="w" in2="SourceGraphic" operator="in" result="t"/>
+      <feMerge><feMergeNode in="SourceGraphic"/><feMergeNode in="t"/></feMerge>
+    </filter>
+  </defs>
+</svg>
+
+<!-- ============ sign in / sign up ============ -->
+<section id="auth" class="auth" hidden>
+  <div class="auth-card">
+    <div class="auth-magnet"></div>
+    <h1 class="brand">magnet <em>diary</em></h1>
+    <p class="auth-sub">a silver board for every day of your life</p>
+    <div class="tabs" role="tablist">
+      <button type="button" data-mode="signin" class="on">sign in</button>
+      <button type="button" data-mode="signup">create account</button>
+    </div>
+    <form id="authForm" autocomplete="on">
+      <label class="f name-field" hidden><span>your name</span><input name="name" autocomplete="name" maxlength="40"></label>
+      <label class="f"><span>email</span><input name="email" type="email" autocomplete="email" required></label>
+      <label class="f"><span>password</span><input name="password" type="password" autocomplete="current-password" minlength="8" required></label>
+      <p class="auth-err" id="authErr" role="alert"></p>
+      <button class="btn-primary" type="submit" id="authBtn">sign in</button>
+    </form>
+  </div>
+</section>
+
+<!-- ============ the journal ============ -->
+<section id="app" class="app" hidden>
+  <header class="top">
+    <button class="title" id="titleBtn" title="rename your diary"></button>
+    <nav class="datenav">
+      <button class="icon" id="prevDay" aria-label="previous day">‹</button>
+      <button class="date" id="dateBtn"><span id="dateMain"></span><small id="dateYear"></small></button>
+      <button class="icon" id="nextDay" aria-label="next day">›</button>
+    </nav>
+    <div class="top-right">
+      <span class="status" id="status"><i></i><span>saved</span></span>
+      <button class="chip" id="daysBtn">days</button>
+      <button class="chip round" id="menuBtn" aria-label="account">•••</button>
+    </div>
+  </header>
+
+  <main class="stage" id="stage">
+    <div class="board-wrap" id="boardWrap">
+      <div class="board bg-silver" id="board">
+        <div class="board-sheen"></div>
+        <div class="empty" id="empty">
+          <p>nothing pinned yet</p>
+          <span>tap ＋ add to begin</span>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="dock">
+    <div class="bar" id="mainBar">
+      <button data-act="add" class="add"><b>＋</b>add</button>
+      <button data-act="board"><b>◐</b>board</button>
+    </div>
+    <div class="bar ctx" id="ctxBar" hidden></div>
+  </footer>
+
+  <input type="file" id="fileIn" accept="image/*" multiple hidden>
+</section>
+
+<!-- sheets -->
+<div class="scrim" id="scrim" hidden></div>
+
+<div class="sheet wide" id="addSheet" hidden>
+  <div class="sheet-head"><h3>add to your board</h3><button class="x" data-close>✕</button></div>
+  <h4 class="sec">photos <span>pick a frame, then choose photos</span></h4>
+  <div class="grid frames" id="frameGrid"></div>
+  <h4 class="sec">write <span>pick a paper</span></h4>
+  <div class="grid papers" id="paperGrid"></div>
+  <h4 class="sec">decorate</h4>
+  <div class="grid stickers" id="stickerGrid"></div>
+</div>
+
+<div class="sheet" id="editSheet" hidden>
+  <div class="sheet-head"><h3 id="editTitle">write</h3><button class="x" data-close>✕</button></div>
+  <div class="edit-paper" id="editPaper"><textarea id="editText" rows="6"></textarea></div>
+  <div class="edit-row">
+    <button class="chip" id="promptBtn">✦ give me a prompt</button>
+    <span class="spacer"></span>
+    <button class="btn-primary small" id="editSave">pin it</button>
+  </div>
+</div>
+
+<div class="sheet" id="daysSheet" hidden>
+  <div class="sheet-head"><h3>your days</h3><button class="x" data-close>✕</button></div>
+  <div class="days-tools">
+    <button class="chip" id="todayBtn">today</button>
+    <label class="chip jump">jump to <input type="date" id="jumpDate"></label>
+  </div>
+  <div class="days-list" id="daysList"></div>
+</div>
+
+<div class="sheet" id="menuSheet" hidden>
+  <div class="sheet-head"><h3>account</h3><button class="x" data-close>✕</button></div>
+  <p class="who" id="whoAmI"></p>
+  <div class="menu-list">
+    <button id="renameBtn">rename diary</button>
+    <button id="signOutBtn">sign out</button>
+    <button id="deleteBtn" class="danger">delete account &amp; everything</button>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden><span></span><button hidden></button></div>
+
+<script src="/app.js" type="module"></script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+{
+  "name": "magnet-diary",
+  "version": "1.0.0",
+  "description": "",
+  "main": "server.js",
+  "scripts": {
+    "dev": "node --watch server.js",
+    "start": "NODE_ENV=production node server.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@hono/node-server": "^2.1.11",
+    "better-auth": "^1.7.27",
+    "better-sqlite3": "^13.2.0",
+    "hono": "^4.13.20"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  }
+}
