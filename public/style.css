@@ -607,3 +607,8 @@ input, textarea { font: inherit; color: inherit; }
 .edit-paper.f-words textarea { font-size: 30px; min-height: 110px; background: linear-gradient(90deg, #8e9194, #d9dadc 55%, #a5a8ac); text-align: center; }
 .g-stk .tile { background: radial-gradient(120% 100% at 30% 20%, #4a4c50, #26272a 70%); }
 .g-words .tile { background: linear-gradient(90deg, #8e9195, #d6d7d9 50%, #a3a6aa); }
+
+.link-btn { display: block; margin: 14px auto 0; font-size: 12px; color: #2b2c2f; text-decoration: underline; text-underline-offset: 3px; }
+.f.dark span { color: var(--mute); }
+.f.dark input { background: rgba(255,255,255,.06); color: var(--ink); border-color: var(--line); }
+#pwErr { color: #ff9a9a; }

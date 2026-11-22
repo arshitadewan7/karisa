@@ -2,55 +2,53 @@
 
 A digital photo journal on a brushed silver board. Every day gets its own board. Photos, notes and stickers stick on like magnets and can be dragged, resized and rotated.
 
-- **Accounts:** email and password via [Better Auth](https://www.better-auth.com). Each person only ever sees their own diary.
-- **Database:** SQLite (one file). No external database service.
-- **Photos:** resized in the browser, then saved on the server. They're only served to the person who uploaded them.
+Live at **https://karisa.space**
+
+## How it's built
+
+- **Front end:** plain HTML, CSS and JavaScript in `public/`. No build step.
+- **Backend:** [Supabase](https://supabase.com) project `karisa` (Sydney).
+  - **Auth:** email and password, with password reset.
+  - **Database:** Postgres. Every photo, note and sticker is its own row in `items`, so several people can edit one board later without overwriting each other.
+  - **Security:** row level security on every table. Boards are private by default. Public boards can be seen but not edited. Only the owner and invited editors can change a board.
+  - **Photos:** a private `photos` bucket, shown through signed links that expire after 12 hours.
+  - **Edge function `delete-account`:** removes someone's photos and account.
+- **Hosting:** Vercel, serving `public/` (see `vercel.json`).
+
+```
+public/index.html      the page
+public/style.css       the look (silver board, papers, magnets)
+public/app.js          the board: dragging, adding, saving
+public/stickers.js     sticker, frame and clip-card library (all SVG)
+public/store.js        every call to Supabase
+public/config.js       Supabase URL + publishable key (safe in the browser)
+public/vendor/         bundled supabase-js
+supabase/migrations/   database schema, security rules, storage
+supabase/functions/    edge functions
+```
 
 ## Run it on your laptop
 
-You need Node 20 or newer.
-
 ```bash
-npm install
 npm run dev
 ```
 
-Open http://localhost:3000 and create an account. Data goes in `./data/` (the database plus an `uploads/` folder).
+Open http://localhost:3000. It talks to the live Supabase project, so use a test account.
 
-## What's in the folder
+## Database tables
 
-```
-server.js              the backend: auth, days, photos
-public/index.html      the page
-public/style.css       the look (silver board, papers, magnets)
-public/app.js          the board: dragging, notes, stickers, saving
-Dockerfile             how the host builds it
-```
+| table | what it holds |
+| --- | --- |
+| `profiles` | one per person: display name, username (later), bio, diary title |
+| `boards` | a day board (`kind = day`) or a shared board; background; visibility (private / followers / public) |
+| `board_members` | people invited to a board, as editor or viewer |
+| `items` | every photo, note, sticker and word-art piece on a board |
+| `follows` | who follows whom (for the community features) |
 
-## Put it on your domain (Railway)
+## Supabase settings to check
 
-Railway runs the app and keeps the database and photos on a persistent disk (a "volume"). It has a small monthly cost; check their current pricing.
-
-1. **Push this folder to GitHub.** Make a new private repo and push this folder to it. `.gitignore` already keeps `node_modules` and `data` out.
-2. **Create the service.** On [railway.com](https://railway.com): New Project → Deploy from GitHub repo → pick the repo. It finds the `Dockerfile` by itself.
-3. **Add a volume.** Right-click the service → Attach Volume → set the mount path to `/data`. **Don't skip this.** Without it, every redeploy wipes all accounts and photos.
-4. **Set the variables.** In the service's Variables tab:
-   - `BETTER_AUTH_SECRET`: a long random string (run `openssl rand -hex 32`, or use Railway's "generate" button)
-   - `BETTER_AUTH_URL`: `https://yourdomain.com`
-   - `DATA_DIR`: `/data`
-   - `NODE_ENV`: `production`
-5. **Connect your domain.** Service → Settings → Networking → Custom Domain → enter `yourdomain.com` (and `www.yourdomain.com` if you want it). Railway shows a DNS record. Add it at the place you bought the domain (GoDaddy, Namecheap, Cloudflare, …). HTTPS is set up automatically once DNS updates, usually within minutes, sometimes up to a few hours.
-6. **If you use both `www` and the bare domain,** set `BETTER_AUTH_URL` to the one you send people to, and put the other in `TRUSTED_ORIGINS`.
-
-Health check URL: `/healthz`.
-
-### Backups
-
-Everything lives in the `/data` volume: `app.db` plus `uploads/`. Railway can snapshot volumes. Turn on backups in the volume settings, because this is someone's diary.
-
-## Add it to the home screen
-
-On iPhone: open the site in Safari → Share → **Add to Home Screen**. It opens full screen with its own icon, like an app.
+- **Authentication → URL Configuration:** Site URL `https://karisa.space`, and add `https://karisa.space/**` and `http://localhost:3000/**` to Redirect URLs.
+- **Authentication → Emails:** Supabase's built-in email only sends to members of your Supabase team. Before other people sign up, either connect your own email sender under **SMTP Settings** (for example Resend), or turn off **Confirm email** under Sign In / Providers → Email. Password reset emails also need SMTP.
 
 ## Using it
 

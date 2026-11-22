@@ -1,5 +1,6 @@
 // magnet diary: client
 import { LIB, CATS, FRAMES2, CARDS, FONTS, INKS } from "/stickers.js";
+import * as db from "/store.js";
 const BW = 900, BH = 1200;
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -11,7 +12,7 @@ const addDays = (s, n) => { const d = parseYmd(s); d.setDate(d.getDate() + n); r
 const today = () => ymd(new Date());
 const rand = (a, b) => a + Math.random() * (b - a);
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
-const uid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()).slice(0, 12);
+const uid = () => crypto.randomUUID ? crypto.randomUUID() : "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) => (c ^ (Math.random() * 16) >> (c / 4)).toString(16));
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const DOW = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
@@ -109,80 +110,105 @@ const S = {
   els: new Map(),
 };
 
-// ---------------- api ----------------
-async function api(path, opts = {}) {
-  const res = await fetch(path, {
-    credentials: "same-origin",
-    ...opts,
-    headers: opts.body && !(opts.body instanceof FormData) ? { "Content-Type": "application/json", ...(opts.headers || {}) } : opts.headers,
-  });
-  if (res.status === 401 && !path.startsWith("/api/auth")) { showAuth(); throw new Error("signed out"); }
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(data.message || data.error || "something went wrong"), { status: res.status });
-  return data;
+// ---------------- photos: private, shown through signed links ----------------
+const BLANK = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
+const URLS = new Map(); // path -> { url, at }
+const URL_TTL = 10 * 60 * 60 * 1000;
+const photoUrl = (path) => { const u = URLS.get(path); return u && Date.now() - u.at < URL_TTL ? u.url : null; };
+let hydrating = null;
+// fill every <img data-photo> on the page with a signed link, fetching missing ones in one go
+async function hydratePhotos(root = document) {
+  const imgs = [...root.querySelectorAll("img[data-photo]")];
+  const missing = [...new Set(imgs.map((i) => i.dataset.photo).filter((p) => p && !photoUrl(p)))];
+  if (missing.length) {
+    try {
+      const got = await db.signPhotos(missing);
+      for (const [p, url] of Object.entries(got)) URLS.set(p, { url, at: Date.now() });
+    } catch { /* leave blanks; next render retries */ }
+  }
+  for (const img of root.querySelectorAll("img[data-photo]")) {
+    const u = photoUrl(img.dataset.photo);
+    if (u && img.getAttribute("src") !== u) img.src = u;
+  }
 }
-const photoUrl = (id) => `/api/photos/${id}`;
+function queueHydrate() {
+  if (hydrating) return;
+  hydrating = requestAnimationFrame(() => { hydrating = null; hydratePhotos(); });
+}
 
 // ---------------- auth screen ----------------
 let authMode = "signin";
-function showAuth() {
+function showAuth(msg = "") {
   $("#app").hidden = true;
   $("#auth").hidden = false;
+  $("#authErr").textContent = msg;
   closeSheets();
 }
-document.querySelectorAll(".tabs button").forEach((b) =>
-  b.addEventListener("click", () => {
-    authMode = b.dataset.mode;
-    document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("on", x === b));
-    $(".name-field").hidden = authMode !== "signup";
-    $("#authBtn").textContent = authMode === "signup" ? "create my diary" : "sign in";
-    $("#authForm").password.autocomplete = authMode === "signup" ? "new-password" : "current-password";
-    $("#authErr").textContent = "";
-  })
-);
+function setAuthMode(mode) {
+  authMode = mode;
+  document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("on", x.dataset.mode === mode));
+  $(".name-field").hidden = mode !== "signup";
+  $(".pw-field").hidden = mode === "forgot";
+  $("#authBtn").textContent = mode === "signup" ? "create my diary" : mode === "forgot" ? "send reset link" : "sign in";
+  $("#forgotLink").textContent = mode === "forgot" ? "back to sign in" : "forgot password?";
+  $("#forgotLink").hidden = mode === "signup";
+  $("#authForm").password.required = mode !== "forgot";
+  $("#authForm").password.autocomplete = mode === "signup" ? "new-password" : "current-password";
+  $("#authErr").textContent = "";
+}
+document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => setAuthMode(b.dataset.mode)));
+$("#forgotLink").addEventListener("click", () => setAuthMode(authMode === "forgot" ? "signin" : "forgot"));
 $("#authForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const f = e.target;
   const btn = $("#authBtn");
+  const email = f.email.value.trim();
   btn.disabled = true;
   $("#authErr").textContent = "";
   try {
     if (authMode === "signup") {
-      await api("/api/auth/sign-up/email", {
-        method: "POST",
-        body: JSON.stringify({ name: f.name.value.trim() || f.email.value.split("@")[0], email: f.email.value.trim(), password: f.password.value }),
-      });
+      const { needsConfirm } = await db.signUp(f.name.value.trim() || email.split("@")[0], email, f.password.value);
+      f.password.value = "";
+      if (needsConfirm) { setAuthMode("signin"); $("#authErr").textContent = "check your email to confirm your account, then sign in here."; return; }
+    } else if (authMode === "forgot") {
+      await db.sendReset(email);
+      $("#authErr").textContent = "if that email has an account, a reset link is on its way.";
+      return;
     } else {
-      await api("/api/auth/sign-in/email", {
-        method: "POST",
-        body: JSON.stringify({ email: f.email.value.trim(), password: f.password.value }),
-      });
+      await db.signIn(email, f.password.value);
+      f.password.value = "";
     }
-    f.password.value = "";
     await boot();
   } catch (err) {
-    $("#authErr").textContent = err.message.toLowerCase();
+    const m = String(err.message || "").toLowerCase();
+    $("#authErr").textContent = m.includes("invalid login") ? "that email and password don't match." : m.includes("rate limit") ? "too many emails sent just now. try again in a bit." : m;
   } finally {
     btn.disabled = false;
   }
 });
 
 // ---------------- boot ----------------
+let booted = false;
 async function boot() {
-  let me;
+  const user = await db.currentUser().catch(() => null);
+  if (!user) return showAuth();
+  S.user = { id: user.id, email: user.email, name: user.user_metadata?.name || "" };
   try {
-    const r = await fetch("/api/me", { credentials: "same-origin" });
-    if (!r.ok) return showAuth();
-    me = await r.json();
-  } catch { return showAuth(); }
-  S.user = me.user;
-  S.title = me.title;
+    const p = await db.getProfile(user.id);
+    S.title = p.diary_title || "";
+    if (p.display_name) S.user.name = p.display_name;
+  } catch { S.title = ""; }
   $("#auth").hidden = true;
   $("#app").hidden = false;
   renderTitle();
   fit();
+  booted = true;
   await openDay(location.hash.match(/^#\d{4}-\d{2}-\d{2}$/) ? location.hash.slice(1) : today());
 }
+db.onAuthChange((event, user) => {
+  if (event === "PASSWORD_RECOVERY") { openPasswordSheet(); return; }
+  if (event === "SIGNED_OUT") { S.user = null; booted = false; showAuth(); }
+});
 
 function renderTitle() {
   const first = (S.user?.name || "my").split(" ")[0].toLowerCase();
@@ -197,15 +223,21 @@ async function openDay(date) {
   history.replaceState(null, "", "#" + date);
   renderDate();
   S.day = { board: "silver", items: [] };
+  S.boardId = null;
+  S.saved = new Map();
+  S.savedBoard = "silver";
   renderBoard();
   try {
-    const d = await api(`/api/days/${date}`);
+    const d = await db.loadDay(S.user.id, date);
     if (S.date !== date) return;
-    S.day = { board: d.board || "silver", items: Array.isArray(d.items) ? d.items : [] };
+    S.boardId = d.boardId;
+    S.day = { board: d.background || "silver", items: d.items };
+    S.savedBoard = S.day.board;
+    S.saved = new Map(d.items.map((it) => [it.id, JSON.stringify(cleanItem(it))]));
     renderBoard();
     setStatus("saved");
   } catch (e) {
-    if (e.message !== "signed out") setStatus("error", "couldn't load");
+    setStatus("error", "couldn't load");
   }
 }
 function renderDate() {
@@ -227,20 +259,23 @@ async function openDays() {
   const list = $("#daysList");
   list.innerHTML = `<p class="days-empty">loading…</p>`;
   try {
-    const { days } = await api("/api/days");
+    await flush();
+    const days = await db.listDays();
     if (!days.length) { list.innerHTML = `<p class="days-empty">no days pinned yet. today is a good start.</p>`; return; }
     list.innerHTML = days.map((d) => {
       const dt = parseYmd(d.date);
       return `<button class="day-row ${d.date === S.date ? "cur" : ""}" data-date="${d.date}">
-        <span class="day-thumb">${d.preview ? `<img src="${photoUrl(d.preview)}" alt="" loading="lazy">` : ""}</span>
+        <span class="day-thumb">${d.preview ? `<img data-photo="${esc(d.preview)}" src="${BLANK}" alt="" loading="lazy">` : ""}</span>
         <span><b>${DOW_LONG[dt.getDay()]} ${dt.getDate()} ${MON[dt.getMonth()]}</b><small>${dt.getFullYear()} · ${d.count} ${d.count === 1 ? "thing" : "things"} pinned</small></span>
       </button>`;
     }).join("");
     list.querySelectorAll(".day-row").forEach((b) => (b.onclick = () => { closeSheets(); openDay(b.dataset.date); }));
+    hydratePhotos(list);
   } catch { list.innerHTML = `<p class="days-empty">couldn't load your days.</p>`; }
 }
 
 // ---------------- saving ----------------
+// Only the pieces that changed since the last save are sent, one row each.
 let saveTimer = null, saving = false, dirty = false;
 function changed() {
   dirty = true;
@@ -251,14 +286,28 @@ function changed() {
 }
 async function flush() {
   clearTimeout(saveTimer);
-  if (!dirty) return;
+  if (!dirty || !S.user) return;
   if (saving) { saveTimer = setTimeout(flush, 300); return; }
   dirty = false;
   saving = true;
-  const date = S.date;
-  const items = S.day.items.map(cleanItem);
+  const { date } = S;
+  const uid = S.user.id;
+  const now = new Map(S.day.items.map((it) => [it.id, cleanItem(it)]));
+  const changedItems = [...now.values()].filter((it) => S.saved.get(it.id) !== JSON.stringify(it));
+  const removed = [...S.saved.keys()].filter((id) => !now.has(id));
+  const bg = S.day.board;
   try {
-    await api(`/api/days/${date}`, { method: "PUT", body: JSON.stringify({ board: S.day.board, items }) });
+    if (!S.boardId && (changedItems.length || bg !== "silver")) S.boardId = await db.ensureDayBoard(uid, date, bg);
+    if (S.boardId && bg !== S.savedBoard) await db.setBackground(S.boardId, bg);
+    if (S.boardId) {
+      await db.saveItems(S.boardId, uid, changedItems);
+      await db.deleteItems(removed);
+    }
+    if (S.date === date) {
+      for (const it of changedItems) S.saved.set(it.id, JSON.stringify(it));
+      for (const id of removed) S.saved.delete(id);
+      S.savedBoard = bg;
+    }
     if (!dirty) setStatus("saved");
   } catch (e) {
     dirty = true;
@@ -270,7 +319,7 @@ async function flush() {
 }
 function cleanItem(it) {
   const o = {};
-  for (const [k, v] of Object.entries(it)) o[k] = typeof v === "number" ? Math.round(v * 10) / 10 : v;
+  for (const [k, v] of Object.entries(it)) if (v !== undefined) o[k] = typeof v === "number" ? Math.round(v * 10) / 10 : v;
   return o;
 }
 function setStatus(kind, text) {
@@ -280,6 +329,26 @@ function setStatus(kind, text) {
 }
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flush(); });
 window.addEventListener("pagehide", () => flush());
+
+// ---------------- new password (from a reset email) ----------------
+function openPasswordSheet() {
+  $("#app").hidden = false;
+  $("#auth").hidden = true;
+  $("#pwErr").textContent = "";
+  openSheet("#pwSheet");
+  setTimeout(() => $("#pwNew").focus(), 60);
+}
+$("#pwSave").addEventListener("click", async () => {
+  const pw = $("#pwNew").value;
+  if (pw.length < 8) { $("#pwErr").textContent = "use at least 8 characters."; return; }
+  try {
+    await db.setPassword(pw);
+    $("#pwNew").value = "";
+    closeSheets();
+    toast("password updated");
+    if (!booted) boot();
+  } catch (err) { $("#pwErr").textContent = String(err.message).toLowerCase(); }
+});
 
 // ---------------- board fit ----------------
 function fit() {
@@ -319,6 +388,7 @@ function paint(it) {
   if (!el) return;
   el.className = `item t-${it.type} ${it.type === "note" ? "t-" + it.paper : ""} ${S.sel === it.id ? "sel" : ""}`;
   el.innerHTML = `<div class="body">${inner(it)}</div>${pinHtml(it)}<div class="handle" title="drag to resize and rotate">↻</div>`;
+  if (el.querySelector("img[data-photo]")) queueHydrate();
 }
 function place(it) {
   const el = S.els.get(it.id);
@@ -367,7 +437,7 @@ function inner(it, date = S.date) {
   if (it.type === "text") return textInner(it);
   return stickerInner(it);
 }
-const imgTag = (id, src) => `<img src="${src || photoUrl(id)}" alt="" draggable="false">`;
+const imgTag = (path, src) => src ? `<img src="${src}" alt="" draggable="false">` : `<img data-photo="${esc(path)}" src="${photoUrl(path) || BLANK}" alt="" draggable="false">`;
 function boothInner(it, date) {
   const b = dateBits(date);
   const shots = (it.src ? it.src : it.photos || []).map((p) => `<div class="bf">${it.src ? imgTag(null, p) : imgTag(p)}</div>`).join("");
@@ -602,12 +672,9 @@ function choosePhotosFor(frame) {
 
 async function uploadPhoto(f) {
   const { blob, w, h } = await compress(f, 2000, 0.86);
-  const fd = new FormData();
-  fd.append("file", blob, "photo.jpg");
-  fd.append("width", w);
-  fd.append("height", h);
-  const r = await api("/api/photos", { method: "POST", body: fd });
-  return { id: r.id, aspect: h / w };
+  const path = await db.uploadPhoto(S.user.id, blob);
+  URLS.set(path, { url: URL.createObjectURL(blob), at: Date.now() }); // show it instantly
+  return { id: path, aspect: h / w };
 }
 
 $("#fileIn").addEventListener("change", async (e) => {
@@ -867,7 +934,7 @@ async function commitEdit(save) {
     if (!save) return;
     S.title = val.trim();
     renderTitle();
-    try { await api("/api/profile", { method: "PUT", body: JSON.stringify({ title: S.title }) }); } catch {}
+    try { await db.setDiaryTitle(S.user.id, S.title); } catch { toast("couldn't save the new name"); }
     return;
   }
   const it = ed.it;
@@ -914,7 +981,7 @@ $("#titleBtn").onclick = () => editTitle();
 $("#renameBtn").onclick = () => editTitle();
 $("#signOutBtn").onclick = async () => {
   await flush();
-  try { await api("/api/auth/sign-out", { method: "POST", body: "{}" }); } catch {}
+  try { await db.signOut(); } catch {}
   S.user = null;
   showAuth();
 };
@@ -926,7 +993,7 @@ $("#deleteBtn").onclick = async (e) => {
     return;
   }
   try {
-    await api("/api/account", { method: "DELETE" });
+    await db.deleteAccount();
     S.user = null;
     showAuth();
   } catch (err) { toast("couldn't delete: " + err.message); }

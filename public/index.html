@@ -97,9 +97,10 @@
     <form id="authForm" autocomplete="on">
       <label class="f name-field" hidden><span>your name</span><input name="name" autocomplete="name" maxlength="40"></label>
       <label class="f"><span>email</span><input name="email" type="email" autocomplete="email" required></label>
-      <label class="f"><span>password</span><input name="password" type="password" autocomplete="current-password" minlength="8" required></label>
+      <label class="f pw-field"><span>password</span><input name="password" type="password" autocomplete="current-password" minlength="8" required></label>
       <p class="auth-err" id="authErr" role="alert"></p>
       <button class="btn-primary" type="submit" id="authBtn">sign in</button>
+      <button class="link-btn" type="button" id="forgotLink">forgot password?</button>
     </form>
   </div>
 </section>
@@ -182,6 +183,13 @@
     <button id="signOutBtn">sign out</button>
     <button id="deleteBtn" class="danger">delete account &amp; everything</button>
   </div>
+</div>
+
+<div class="sheet" id="pwSheet" hidden>
+  <div class="sheet-head"><h3>set a new password</h3><button class="x" data-close>✕</button></div>
+  <label class="f dark"><span>new password</span><input id="pwNew" type="password" autocomplete="new-password" minlength="8"></label>
+  <p class="auth-err" id="pwErr"></p>
+  <div class="edit-row"><span class="spacer"></span><button class="btn-primary small" id="pwSave">save password</button></div>
 </div>
 
 <div class="toast" id="toast" hidden><span></span><button hidden></button></div>
