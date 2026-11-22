@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" href="/icon-180.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Mono:wght@400;500&family=Gochi+Hand&family=Caveat:wght@500;700&family=Kalam&family=Special+Elite&family=VT323&family=Reenie+Beanie&family=Oswald:wght@500;700&family=Rubik+Mono+One&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Mono:wght@400;500&family=Gochi+Hand&family=Caveat:wght@500;700&family=Kalam&family=Special+Elite&family=VT323&family=Reenie+Beanie&family=Oswald:wght@500;700&family=Rubik+Mono+One&family=Homemade+Apple&family=Nothing+You+Could+Do&family=Shadows+Into+Light&family=La+Belle+Aurore&family=Mrs+Saint+Delafield&family=Pinyon+Script&family=Playfair+Display:ital@1&family=Cherry+Bomb+One&family=Rubik+Bubbles&family=Courier+Prime&family=Silkscreen&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -35,6 +35,46 @@
       <stop offset=".72" stop-color="#f5d6e3"/>
       <stop offset="1" stop-color="#8e5670"/>
     </linearGradient>
+    <linearGradient id="chromeInk" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#d8dade"/><stop offset=".3" stop-color="#5b5f66"/><stop offset=".55" stop-color="#1d1f23"/><stop offset=".75" stop-color="#8d9198"/><stop offset="1" stop-color="#2a2c30"/>
+    </linearGradient>
+    <linearGradient id="holo" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6d4dff"/><stop offset=".3" stop-color="#57b9ff"/><stop offset=".55" stop-color="#b65cff"/><stop offset=".8" stop-color="#ff7ccf"/><stop offset="1" stop-color="#5fe3ff"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity=".9"/><stop offset=".35" stop-color="#fff" stop-opacity="0"/><stop offset=".7" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".35"/>
+    </linearGradient>
+    <radialGradient id="pearl" cx=".35" cy=".3" r=".75"><stop offset="0" stop-color="#fff"/><stop offset=".5" stop-color="#f4eee6"/><stop offset="1" stop-color="#cbbfb2"/></radialGradient>
+    <radialGradient id="seqG" cx=".35" cy=".3" r=".8"><stop offset="0" stop-color="#ffffff"/><stop offset=".45" stop-color="#d1d4d8"/><stop offset="1" stop-color="#6d7076"/></radialGradient>
+    <pattern id="threads" width="2.2" height="2.2" patternUnits="userSpaceOnUse" patternTransform="rotate(35)">
+      <rect width="2.2" height="1.1" fill="#fff" fill-opacity=".22"/><rect y="1.1" width="2.2" height="1.1" fill="#000" fill-opacity=".09"/>
+    </pattern>
+    <pattern id="mirror" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(-12)">
+      <rect width="8" height="8" fill="#4d5055"/><rect x=".5" y=".5" width="3" height="3" fill="#eceef0"/><rect x="4.5" y=".5" width="3" height="3" fill="#9a9da2"/><rect x=".5" y="4.5" width="3" height="3" fill="#c4c6ca"/><rect x="4.5" y="4.5" width="3" height="3" fill="#f9f9fa"/>
+    </pattern>
+    <pattern id="sequin" width="6" height="6" patternUnits="userSpaceOnUse">
+      <rect width="6" height="6" fill="#7d8086"/><circle cx="3" cy="3" r="2.7" fill="url(#seqG)"/><circle cx="0" cy="0" r="2.7" fill="url(#seqG)"/><circle cx="6" cy="0" r="2.7" fill="url(#seqG)"/><circle cx="0" cy="6" r="2.7" fill="url(#seqG)"/><circle cx="6" cy="6" r="2.7" fill="url(#seqG)"/>
+    </pattern>
+    <filter id="glaze" x="-15%" y="-15%" width="130%" height="130%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="3" result="b"/>
+      <feSpecularLighting in="b" surfaceScale="5" specularConstant=".85" specularExponent="18" lighting-color="#fff" result="s">
+        <fePointLight x="25" y="5" z="90"/>
+      </feSpecularLighting>
+      <feComposite in="s" in2="SourceAlpha" operator="in" result="s2"/>
+      <feComposite in="SourceGraphic" in2="s2" operator="arithmetic" k1="0" k2="1" k3=".85" k4="0"/>
+    </filter>
+    <filter id="glitter" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="1.6" numOctaves="1" seed="5" result="n"/>
+      <feColorMatrix in="n" type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 9 -5.2" result="dots"/>
+      <feComposite in="dots" in2="SourceAlpha" operator="in" result="d2"/>
+      <feMerge><feMergeNode in="SourceGraphic"/><feMergeNode in="d2"/></feMerge>
+    </filter>
+    <filter id="denim" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="1.1 .22" numOctaves="2" seed="2" result="n"/>
+      <feColorMatrix in="n" type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .7 -.15" result="w"/>
+      <feComposite in="w" in2="SourceAlpha" operator="in" result="t"/>
+      <feMerge><feMergeNode in="SourceGraphic"/><feMergeNode in="t"/></feMerge>
+    </filter>
     <filter id="felt" x="-5%" y="-5%" width="110%" height="110%">
       <feTurbulence type="fractalNoise" baseFrequency="1.4" numOctaves="2" seed="4" result="n"/>
       <feColorMatrix in="n" type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .55 -.1" result="w"/>
@@ -107,18 +147,17 @@
 <div class="scrim" id="scrim" hidden></div>
 
 <div class="sheet wide" id="addSheet" hidden>
-  <div class="sheet-head"><h3>add to your board</h3><button class="x" data-close>✕</button></div>
-  <h4 class="sec">photos <span>pick a frame, then choose photos</span></h4>
-  <div class="grid frames" id="frameGrid"></div>
-  <h4 class="sec">write <span>pick a paper</span></h4>
-  <div class="grid papers" id="paperGrid"></div>
-  <h4 class="sec">decorate</h4>
-  <div class="grid stickers" id="stickerGrid"></div>
+  <div class="sheet-head"><h3 id="addTitle">add to your board</h3><button class="x" data-close>✕</button></div>
+  <nav class="addtabs" id="addTabs"></nav>
+  <p class="addhint" id="addHint"></p>
+  <div class="grid" id="addGrid"></div>
 </div>
 
 <div class="sheet" id="editSheet" hidden>
   <div class="sheet-head"><h3 id="editTitle">write</h3><button class="x" data-close>✕</button></div>
   <div class="edit-paper" id="editPaper"><textarea id="editText" rows="6"></textarea></div>
+  <div class="fontrow" id="fontRow"></div>
+  <div class="inkrow" id="inkRow"></div>
   <div class="edit-row">
     <button class="chip" id="promptBtn">✦ give me a prompt</button>
     <span class="spacer"></span>

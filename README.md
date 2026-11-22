@@ -55,10 +55,17 @@ On iPhone: open the site in Safari → Share → **Add to Home Screen**. It open
 ## Using it
 
 - Every new day starts as an empty board.
-- **＋ add** opens one menu with everything:
-  - **Photos:** pick a frame first (vintage photobooth strip, polaroid, print, pocket gadget, no border), then choose photos. A photobooth strip takes up to 4 photos and develops them into one grainy strip in black and white, sepia or faded colour. Polaroids and prints become one framed photo per picture.
-  - **Write:** guest check, postcard, notebook, receipt, ticket, sticky, typewriter or label tape. The writing sheet has a **give me a prompt** button for when she doesn't know what to write.
-  - **Decorate:** felt puzzle pieces, a chrome spiral, stars, hearts, pin buttons and plain magnets.
+- **＋ add** opens one library with tabs:
+  - **photos:** pick a frame, then choose photos. Photobooth strip (up to 4 photos, black and white / sepia / faded), polaroid, print, pocket gadget, no border, four digicams (silver, pink, black, champagne), candybar phone, mp3 player, retro TV, vintage ID card (her name goes on the card), felt laced frame, starburst frame, ribbon frame and pop-up window.
+  - **write:** guest check, postcard, notebook, receipt, ticket, sticky, typewriter, label tape, plus clip cards (scallop, oval label, ring notebook, dashed card, pink oval), a pop-up message and a "now playing" song card.
+  - **words:** word-art text in sticker, outline, chrome, label or plain styles.
+  - **stars:** embroidered patches, puffy satin, chrome, faceted, disco, sequin, glitter, holographic, jelly, denim, tiny star scatter, sparkles.
+  - **clips & pins:** binder clips in 13 finishes, safety pins, paperclip, push pins, pixel cursor and hand, wax seal.
+  - **buttons:** sewing buttons in solid colours, gingham, polka, heart, flower, daisy, star and bunny shapes.
+  - **charms:** glazed bows, angel wing, clover, moon, key, butterfly, fish, hearts, flowers, cherries.
+  - **classics:** the original felt puzzle pieces, spiral, chrome star/heart, pin buttons and magnets.
+- **Fonts and ink:** every note, caption and word-art piece has a font picker (18 fonts: handwriting, script, serif, typewriter, pixel, bubble) and ink colours.
+- To change a photo's frame or a note's paper later, select it and tap the frame/paper button in the bar.
 - **◐ board**: silver, gunmetal, pearl or rose metal.
 - Tap something to select it. **Drag** to move, drag the **↻ handle** to resize and rotate, or **pinch and twist with two fingers** on a phone. Double-tap a note to write on it.
 - The bar changes when something is selected: change photo style (polaroid / print / bare / pocket gadget), black and white, photobooth tone, caption, magnet or tape, paper type, front, back, copy, delete (with undo).
