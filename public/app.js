@@ -1,6 +1,7 @@
 // magnet diary: client
 import { LIB, CATS, FRAMES2, CARDS, FONTS, INKS } from "/stickers.js";
 import * as db from "/store.js";
+import * as community from "/community.js";
 const BW = 900, BH = 1200;
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -187,59 +188,214 @@ $("#authForm").addEventListener("submit", async (e) => {
   }
 });
 
-// ---------------- boot ----------------
+// ---------------- boot + routing ----------------
 let booted = false;
 async function boot() {
   const user = await db.currentUser().catch(() => null);
   if (!user) return showAuth();
   S.user = { id: user.id, email: user.email, name: user.user_metadata?.name || "" };
   try {
-    const p = await db.getProfile(user.id);
-    S.title = p.diary_title || "";
-    if (p.display_name) S.user.name = p.display_name;
-  } catch { S.title = ""; }
+    S.me = await db.myProfile(user.id);
+    S.title = S.me.diary_title || "";
+    if (S.me.display_name) S.user.name = S.me.display_name;
+  } catch { S.me = { id: user.id }; S.title = ""; }
   $("#auth").hidden = true;
   $("#app").hidden = false;
   renderTitle();
-  fit();
   booted = true;
-  await openDay(location.hash.match(/^#\d{4}-\d{2}-\d{2}$/) ? location.hash.slice(1) : today());
+  await route();
 }
 db.onAuthChange((event, user) => {
   if (event === "PASSWORD_RECOVERY") { openPasswordSheet(); return; }
-  if (event === "SIGNED_OUT") { S.user = null; booted = false; showAuth(); }
+  if (event === "SIGNED_OUT") { S.user = null; booted = false; leaveBoard(); showAuth(); }
 });
+
+async function route() {
+  if (!S.user) return;
+  const h = decodeURIComponent(location.hash.slice(1));
+  if (/^\d{4}-\d{2}-\d{2}$/.test(h)) return openDay(h);
+  if (h === "" || h === "today") return openDay(today());
+  if (h.startsWith("b/")) return openBoard(h.slice(2));
+  if (h === "feed" || h === "following") return community.feedPage("following");
+  if (h === "explore") return community.feedPage("explore");
+  if (h === "together") return community.togetherPage();
+  if (h === "me") return community.mePage();
+  if (h.startsWith("@")) return community.profilePage(h.slice(1).toLowerCase());
+  if (h.startsWith("p/")) return community.postPage(h.slice(2));
+  return openDay(today());
+}
+window.addEventListener("hashchange", () => { if (S.user) route(); });
+
+// which screen is showing: the editable board, or a scrolling page
+function setView(kind, tab) {
+  S.view = kind;
+  const onBoard = kind === "board";
+  const isDay = onBoard && S.ctx?.kind === "day";
+  $("#stage").hidden = !onBoard;
+  $("#page").hidden = onBoard;
+  document.querySelector(".dock").hidden = !onBoard;
+  $("#status").hidden = !onBoard;
+  $("#daysBtn").hidden = !isDay;
+  $("#dateNav").hidden = !isDay;
+  $("#boardHead").hidden = !(onBoard && !isDay);
+  $("#bgBtn").hidden = !S.isOwner;
+  $("#postBtn").hidden = !S.isOwner;
+  $("#peopleBtn").hidden = !(onBoard && S.ctx?.kind === "board");
+  document.querySelectorAll("#tabbar [data-tab]").forEach((a) => a.classList.toggle("on", a.dataset.tab === tab));
+  if (onBoard) fit();
+  else select(null);
+}
+function ctxKey() { return S.ctx?.kind === "day" ? "d:" + S.date : "b:" + S.boardId; }
+
+// stop editing whatever board is open (save it, stop listening for friends' changes)
+function leaveBoard() {
+  if (S.unwatch) { S.unwatch(); S.unwatch = null; }
+  S.live = [];
+  if (dirty) flush();
+}
 
 function renderTitle() {
   const first = (S.user?.name || "my").split(" ")[0].toLowerCase();
   $("#titleBtn").textContent = S.title || `${first}'s magnet diary`;
 }
+function renderPostBtn() {
+  const b = $("#postBtn");
+  b.classList.toggle("on", !!S.post);
+  b.querySelector("span").textContent = S.post ? "posted" : "post";
+}
 
 // ---------------- days ----------------
 async function openDay(date) {
   await flush();
+  leaveBoard();
+  S.ctx = { kind: "day", date };
   S.date = date;
+  S.isOwner = true;
+  S.post = null;
+  S.visibility = "private";
   select(null);
-  history.replaceState(null, "", "#" + date);
+  if (location.hash !== "#" + date) history.replaceState(null, "", "#" + date);
   renderDate();
   S.day = { board: "silver", items: [] };
   S.boardId = null;
   S.saved = new Map();
   S.savedBoard = "silver";
+  setView("board", "diary");
   renderBoard();
+  renderPostBtn();
   try {
     const d = await db.loadDay(S.user.id, date);
-    if (S.date !== date) return;
+    if (ctxKey() !== "d:" + date) return;
     S.boardId = d.boardId;
     S.day = { board: d.background || "silver", items: d.items };
     S.savedBoard = S.day.board;
     S.saved = new Map(d.items.map((it) => [it.id, JSON.stringify(cleanItem(it))]));
     renderBoard();
     setStatus("saved");
+    if (S.boardId) {
+      startWatch(S.boardId);
+      const [post, info] = await Promise.all([db.postForBoard(S.boardId), db.boardInfo(S.boardId)]);
+      if (ctxKey() !== "d:" + date) return;
+      S.post = post;
+      S.visibility = info?.visibility || "private";
+      renderPostBtn();
+    }
   } catch (e) {
     setStatus("error", "couldn't load");
   }
 }
+
+// ---------------- shared boards (and any board by id) ----------------
+async function openBoard(id) {
+  await flush();
+  leaveBoard();
+  select(null);
+  let info = null;
+  try { info = await db.boardInfo(id); } catch {}
+  if (!info) { pageMessage("this board isn't available. it may have been deleted, or you're not on it."); return; }
+  if (info.kind === "day" && info.my_role === "owner") return openDay(info.day);
+  if (info.my_role !== "owner" && info.my_role !== "editor") {
+    if (info.post_id) { history.replaceState(null, "", "#p/" + info.post_id); return community.postPage(info.post_id); }
+    pageMessage("you can see this board once its owner adds you.");
+    return;
+  }
+  S.ctx = { kind: "board", id, info };
+  S.isOwner = info.my_role === "owner";
+  S.boardId = id;
+  S.post = info.post_id ? { id: info.post_id } : null;
+  S.visibility = info.visibility;
+  S.day = { board: info.background || "silver", items: [] };
+  S.saved = new Map();
+  S.savedBoard = S.day.board;
+  $("#boardTitle").textContent = info.title || "untitled memories";
+  $("#boardTitle").classList.toggle("editable", S.isOwner);
+  $("#boardFaces").innerHTML = "";
+  $("#boardLive").textContent = "";
+  setView("board", "together");
+  renderBoard();
+  renderPostBtn();
+  try {
+    const items = await db.boardItems(id);
+    if (ctxKey() !== "b:" + id) return;
+    S.day.items = items;
+    S.saved = new Map(items.map((it) => [it.id, JSON.stringify(cleanItem(it))]));
+    renderBoard();
+    setStatus("saved");
+    startWatch(id);
+    db.boardPeople(id).then(setFaces).catch(() => {});
+    if (S.post) db.postForBoard(id).then((p) => { if (ctxKey() === "b:" + id) { S.post = p; renderPostBtn(); } }).catch(() => {});
+  } catch { setStatus("error", "couldn't load"); }
+}
+function pageMessage(msg) {
+  leaveBoard();
+  setView("page", "together");
+  $("#page").innerHTML = `<section class="empty-page small"><p>${esc(msg)}</p><a class="chip" href="#together">back to together</a></section>`;
+}
+function setFaces(people) {
+  if (S.ctx?.kind !== "board") return;
+  S.people = people;
+  const live = new Set((S.live || []).map((p) => p.uid));
+  $("#boardFaces").innerHTML = people.slice(0, 5).map((p) => `<span class="face ${live.has(p.user_id) ? "live" : ""}">${community.avatar(p, "s")}</span>`).join("");
+}
+$("#boardBack").onclick = () => (location.hash = "#together");
+$("#boardTitle").onclick = () => { if (S.isOwner) editBoardTitle(); };
+$("#boardPeopleBtn").onclick = () => community.openPeople();
+
+// live: apply friends' changes as they happen
+function startWatch(boardId) {
+  if (S.unwatch) S.unwatch();
+  S.unwatch = db.watchBoard(boardId, S.user, (ev) => {
+    if (S.boardId !== boardId) return;
+    const { type, item } = ev;
+    const cur = find(item.id);
+    if (G && G.id === item.id) return; // she's holding it right now
+    if (editing && editing.it && editing.it.id === item.id) return;
+    if (type === "delete") {
+      if (!cur || !S.saved.has(item.id)) return;
+      S.day.items = S.day.items.filter((i) => i !== cur);
+      S.els.get(item.id)?.remove();
+      S.els.delete(item.id);
+      S.saved.delete(item.id);
+      if (S.sel === item.id) select(null);
+      $("#empty").hidden = S.day.items.length > 0;
+      return;
+    }
+    const incoming = JSON.stringify(cleanItem(item));
+    if (S.saved.get(item.id) === incoming) return; // our own save coming back
+    if (cur && JSON.stringify(cleanItem(cur)) !== S.saved.get(item.id)) return; // she has unsaved changes to it
+    S.saved.set(item.id, incoming);
+    if (cur) { Object.keys(cur).forEach((k) => delete cur[k]); Object.assign(cur, item); paint(cur); place(cur); }
+    else { S.day.items.push(item); mount(item); }
+    $("#empty").hidden = S.day.items.length > 0;
+  }, (people) => {
+    S.live = people;
+    if (S.ctx?.kind !== "board") return;
+    const others = people.filter((p) => p.uid !== S.user.id).length;
+    $("#boardLive").textContent = others ? `${others} here now` : "";
+    if (S.people) setFaces(S.people);
+  });
+}
+
 function renderDate() {
   const d = parseYmd(S.date);
   const isToday = S.date === today();
@@ -286,30 +442,40 @@ function changed() {
 }
 async function flush() {
   clearTimeout(saveTimer);
-  if (!dirty || !S.user) return;
+  if (!dirty || !S.user || !S.ctx) return;
   if (saving) { saveTimer = setTimeout(flush, 300); return; }
   dirty = false;
   saving = true;
-  const { date } = S;
+  const key = ctxKey();
+  const isDay = S.ctx.kind === "day";
+  const date = S.date;
   const uid = S.user.id;
-  const now = new Map(S.day.items.map((it) => [it.id, cleanItem(it)]));
-  const changedItems = [...now.values()].filter((it) => S.saved.get(it.id) !== JSON.stringify(it));
-  const removed = [...S.saved.keys()].filter((id) => !now.has(id));
+  const items = S.day.items;
+  const saved = S.saved;
+  const now = new Map(items.map((it) => [it.id, cleanItem(it)]));
+  const changedItems = [...now.values()].filter((it) => saved.get(it.id) !== JSON.stringify(it));
+  const removed = [...saved.keys()].filter((id) => !now.has(id));
   const bg = S.day.board;
   try {
-    if (!S.boardId && (changedItems.length || bg !== "silver")) S.boardId = await db.ensureDayBoard(uid, date, bg);
-    if (S.boardId && bg !== S.savedBoard) await db.setBackground(S.boardId, bg);
-    if (S.boardId) {
-      await db.saveItems(S.boardId, uid, changedItems);
+    if (isDay && !S.boardId && (changedItems.length || bg !== "silver")) {
+      S.boardId = await db.ensureDayBoard(uid, date, bg);
+      if (ctxKey() === "d:" + date) startWatch(S.boardId);
+    }
+    const boardId = S.boardId;
+    if (boardId && S.isOwner && bg !== S.savedBoard) await db.setBackground(boardId, bg);
+    if (boardId) {
+      // mark as saved before the write lands so our own echo from the live feed is ignored
+      for (const it of changedItems) saved.set(it.id, JSON.stringify(it));
+      for (const id of removed) saved.delete(id);
+      await db.saveItems(boardId, uid, changedItems);
       await db.deleteItems(removed);
     }
-    if (S.date === date) {
-      for (const it of changedItems) S.saved.set(it.id, JSON.stringify(it));
-      for (const id of removed) S.saved.delete(id);
-      S.savedBoard = bg;
-    }
+    if (ctxKey() === key || (isDay && ctxKey() === "d:" + date)) S.savedBoard = bg;
     if (!dirty) setStatus("saved");
   } catch (e) {
+    // put them back as unsaved so the retry sends them again
+    for (const it of changedItems) saved.delete(it.id);
+    for (const id of removed) saved.set(id, "unsaved-delete");
     dirty = true;
     setStatus("error", "not saved, retrying");
     saveTimer = setTimeout(flush, 4000);
@@ -653,7 +819,9 @@ $("#mainBar").addEventListener("click", (e) => {
   if (!b) return;
   const a = b.dataset.act;
   if (a === "add") openAdd();
-  if (a === "board") {
+  if (a === "post") community.openPostSheet();
+  if (a === "people") community.openPeople();
+  if (a === "board" && S.isOwner) {
     S.day.board = cycle(BOARDS, S.day.board);
     $("#board").className = "board bg-" + S.day.board;
     toast(`${S.day.board} board`);
@@ -727,18 +895,24 @@ $("#fileIn").addEventListener("change", async (e) => {
   toast(files.length > 1 ? `${files.length} photos pinned` : "photo pinned");
 });
 
-async function compress(file, max, q) {
+async function compress(file, max, q, square = false) {
   let src;
   try { src = await createImageBitmap(file, { imageOrientation: "from-image" }); }
   catch {
     src = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error("unreadable image")); i.src = URL.createObjectURL(file); });
   }
   const w0 = src.width, h0 = src.height;
-  const s = Math.min(1, max / Math.max(w0, h0));
   const c = document.createElement("canvas");
-  c.width = Math.round(w0 * s);
-  c.height = Math.round(h0 * s);
-  c.getContext("2d").drawImage(src, 0, 0, c.width, c.height);
+  if (square) {
+    const side = Math.min(w0, h0), out = Math.min(max, side);
+    c.width = c.height = out;
+    c.getContext("2d").drawImage(src, (w0 - side) / 2, (h0 - side) / 2, side, side, 0, 0, out, out);
+  } else {
+    const s = Math.min(1, max / Math.max(w0, h0));
+    c.width = Math.round(w0 * s);
+    c.height = Math.round(h0 * s);
+    c.getContext("2d").drawImage(src, 0, 0, c.width, c.height);
+  }
   const blob = await new Promise((r) => c.toBlob(r, "image/jpeg", q));
   if (!blob) throw new Error("unreadable image");
   return { blob, w: c.width, h: c.height };
@@ -901,13 +1075,14 @@ $("#inkRow").addEventListener("click", (e) => {
   editing.ink = b.dataset.ink;
   renderFontRows();
 });
-function editTitle() {
-  editing = { kind: "title" };
-  $("#editText").value = S.title;
-  $("#editText").placeholder = $("#titleBtn").textContent;
-  $("#editText").maxLength = 60;
+function editTitle(kind = "title") {
+  editing = { kind };
+  const board = kind === "boardTitle";
+  $("#editText").value = board ? S.ctx?.info?.title || "" : S.title;
+  $("#editText").placeholder = board ? "name this board" : $("#titleBtn").textContent;
+  $("#editText").maxLength = board ? 80 : 60;
   $("#editPaper").className = "edit-paper f-title";
-  $("#editTitle").textContent = "name your diary";
+  $("#editTitle").textContent = board ? "name this board" : "name your diary";
   $("#promptBtn").hidden = true;
   $("#fontRow").hidden = $("#inkRow").hidden = true;
   $("#editText").style.fontFamily = $("#editText").style.color = "";
@@ -930,6 +1105,12 @@ async function commitEdit(save) {
   closeSheets(true);
   if (!ed) return;
   const val = $("#editText").value.replace(/\s+$/, "");
+  if (ed.kind === "boardTitle") {
+    if (!save || !S.ctx?.info) return;
+    const t = val.trim() || "untitled memories";
+    try { await db.renameBoard(S.ctx.info.id, t); S.ctx.info.title = t; $("#boardTitle").textContent = t; } catch { toast("couldn't rename the board"); }
+    return;
+  }
   if (ed.kind === "title") {
     if (!save) return;
     S.title = val.trim();
@@ -976,7 +1157,8 @@ $("#scrim").onclick = () => closeSheets();
 document.querySelectorAll("[data-close]").forEach((b) => (b.onclick = () => closeSheets()));
 
 // account menu
-$("#menuBtn").onclick = () => { $("#whoAmI").textContent = `signed in as ${S.user?.email || ""}`; openSheet("#menuSheet"); };
+function openMenu() { $("#whoAmI").textContent = `signed in as ${S.user?.email || ""}`; openSheet("#menuSheet"); }
+$("#menuBtn").onclick = openMenu;
 $("#titleBtn").onclick = () => editTitle();
 $("#renameBtn").onclick = () => editTitle();
 $("#signOutBtn").onclick = async () => {
@@ -1125,16 +1307,19 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") { if (!$("#scrim").hidden) closeSheets(); else select(null); }
   const it = S.sel && find(S.sel);
   if (!it) {
-    if (e.key === "ArrowLeft") openDay(addDays(S.date, -1));
-    if (e.key === "ArrowRight") openDay(addDays(S.date, 1));
+    if (S.view === "board" && S.ctx?.kind === "day" && $("#scrim").hidden) {
+      if (e.key === "ArrowLeft") openDay(addDays(S.date, -1));
+      if (e.key === "ArrowRight") openDay(addDays(S.date, 1));
+    }
     return;
   }
   if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); removeItem(it); }
 });
 
-window.addEventListener("hashchange", () => {
-  const h = location.hash.slice(1);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(h) && h !== S.date && S.user) openDay(h);
-});
 
+community.init({
+  db, S, esc, inner, pinHtml, baseOf, hydratePhotos, toast, openSheet, closeSheets, setView, leaveBoard, route, flush,
+  compress, renderTitle, renderPostBtn, openMenu, setFaces, parseYmd, MON, DOW_LONG, BW, BLANK,
+  editBoardTitle: () => editTitle("boardTitle"),
+});
 boot();

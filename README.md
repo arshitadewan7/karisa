@@ -15,11 +15,22 @@ Live at **https://karisa.space**
   - **Edge function `delete-account`:** removes someone's photos and account.
 - **Hosting:** Vercel, serving `public/` (see `vercel.json`).
 
+## Community
+
+- **Profiles:** username, name, bio and photo. Asked for the first time someone opens the feed, together, me, or posts.
+- **Posting:** on any board you own, tap **↗ post**, write a caption and choose **followers** or **everyone**. The post shows the live board, so anything added later appears on it. "take it down" makes the board private again.
+- **Feed:** *following* (people you follow, plus your own posts) and *explore* (everything posted for everyone). Find friends by name or @username.
+- **Magnets and comments:** a magnet is a like. Comments can be deleted by whoever wrote them or by the post's owner.
+- **Together:** shared memory boards. Create one, tap **people** and invite friends by @username. Everyone on the board can add and move things, and changes show up on everyone's screen live. Green rings show who has it open.
+- **Me:** your profile, your posts, and activity (new followers, magnets, comments, board invites).
+- **Safety:** diaries are private unless posted. Posts, comments and profiles can be reported; reports land in the `reports` table (Supabase → Table Editor) for you to review.
+
 ```
 public/index.html      the page
 public/style.css       the look (silver board, papers, magnets)
 public/app.js          the board: dragging, adding, saving
 public/stickers.js     sticker, frame and clip-card library (all SVG)
+public/community.js    feed, profiles, posting, comments, together boards
 public/store.js        every call to Supabase
 public/config.js       Supabase URL + publishable key (safe in the browser)
 public/vendor/         bundled supabase-js
@@ -43,7 +54,11 @@ Open http://localhost:3000. It talks to the live Supabase project, so use a test
 | `boards` | a day board (`kind = day`) or a shared board; background; visibility (private / followers / public) |
 | `board_members` | people invited to a board, as editor or viewer |
 | `items` | every photo, note, sticker and word-art piece on a board |
-| `follows` | who follows whom (for the community features) |
+| `follows` | who follows whom |
+| `posts` | a board shared to the feed, with caption |
+| `reactions` | magnets (likes) on posts |
+| `comments` | comments on posts |
+| `reports` | reports filed by people, for you to review |
 
 ## Supabase settings to check
 

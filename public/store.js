@@ -112,3 +112,184 @@ export async function signPhotos(paths) {
   for (const d of data) if (d.signedUrl) out[d.path] = d.signedUrl;
   return out;
 }
+
+// =====================================================================
+// community
+// =====================================================================
+export async function myProfile(uid) {
+  const { data, error } = await sb.from("profiles").select("id, username, display_name, bio, avatar_path, diary_title").eq("id", uid).single();
+  fail(error);
+  return data;
+}
+export async function updateProfile(uid, fields) {
+  const { error } = await sb.from("profiles").update(fields).eq("id", uid);
+  if (error?.code === "23505") throw new Error("that username is taken");
+  if (error?.code === "23514") throw new Error("usernames are 3 to 24 letters, numbers, dots or underscores");
+  fail(error);
+}
+export function avatarUrl(path) {
+  if (!path) return null;
+  return sb.storage.from("avatars").getPublicUrl(path).data.publicUrl;
+}
+export async function uploadAvatar(uid, blob) {
+  const path = `${uid}/avatar-${Date.now()}.jpg`;
+  const { error } = await sb.storage.from("avatars").upload(path, blob, { contentType: "image/jpeg", cacheControl: "31536000" });
+  fail(error);
+  await updateProfile(uid, { avatar_path: path });
+  return path;
+}
+export async function searchPeople(q) {
+  const term = q.replace(/[%_,()]/g, "").trim();
+  if (!term) return [];
+  const { data, error } = await sb.from("profiles").select("id, username, display_name, avatar_path")
+    .not("username", "is", null).or(`username.ilike.%${term}%,display_name.ilike.%${term}%`).limit(20);
+  fail(error);
+  return data;
+}
+export async function profileByUsername(username) {
+  const { data, error } = await sb.rpc("profile_by_username", { p_username: username });
+  fail(error);
+  return data[0] || null;
+}
+export async function follow(me, them) {
+  const { error } = await sb.from("follows").insert({ follower_id: me, followee_id: them });
+  if (error && error.code !== "23505") fail(error);
+}
+export async function unfollow(me, them) {
+  const { error } = await sb.from("follows").delete().eq("follower_id", me).eq("followee_id", them);
+  fail(error);
+}
+
+// ---------- posts ----------
+export async function feed({ kind = "explore", author = null, post = null, before = null, limit = 20 } = {}) {
+  const { data, error } = await sb.rpc("posts_feed", { p_kind: kind, p_author: author, p_post: post, p_before: before, p_limit: limit });
+  fail(error);
+  return data.map((p) => ({
+    ...p,
+    magnets: Number(p.magnets),
+    comment_count: Number(p.comment_count),
+    items: (p.items || []).map((r) => ({ ...r.data, id: r.id, type: r.type, z: r.z })),
+  }));
+}
+export async function boardInfo(boardId) {
+  const { data, error } = await sb.rpc("board_info", { p_board: boardId });
+  fail(error);
+  return data[0] || null;
+}
+export async function boardItems(boardId) {
+  const { data, error } = await sb.from("items").select("id, type, data, z, author_id").eq("board_id", boardId).order("z");
+  fail(error);
+  return data.map((r) => ({ ...r.data, id: r.id, type: r.type, z: r.z, _author: r.author_id }));
+}
+export async function setVisibility(boardId, visibility) {
+  const { error } = await sb.from("boards").update({ visibility }).eq("id", boardId);
+  fail(error);
+}
+export async function postForBoard(boardId) {
+  const { data, error } = await sb.from("posts").select("id, caption, created_at").eq("board_id", boardId).maybeSingle();
+  fail(error);
+  return data;
+}
+export async function publishBoard(uid, boardId, caption, visibility) {
+  await setVisibility(boardId, visibility);
+  const existing = await postForBoard(boardId);
+  if (existing) {
+    const { error } = await sb.from("posts").update({ caption }).eq("id", existing.id);
+    fail(error);
+    return existing.id;
+  }
+  const { data, error } = await sb.from("posts").insert({ board_id: boardId, author_id: uid, caption }).select("id").single();
+  fail(error);
+  return data.id;
+}
+export async function unpublishBoard(boardId) {
+  const { error } = await sb.from("posts").delete().eq("board_id", boardId);
+  fail(error);
+  await setVisibility(boardId, "private");
+}
+export async function react(uid, postId) {
+  const { error } = await sb.from("reactions").insert({ post_id: postId, user_id: uid });
+  if (error && error.code !== "23505") fail(error);
+}
+export async function unreact(uid, postId) {
+  const { error } = await sb.from("reactions").delete().eq("post_id", postId).eq("user_id", uid);
+  fail(error);
+}
+export async function comments(postId) {
+  const { data, error } = await sb.rpc("post_comments", { p_post: postId });
+  fail(error);
+  return data;
+}
+export async function addComment(uid, postId, body) {
+  const { error } = await sb.from("comments").insert({ post_id: postId, author_id: uid, body });
+  fail(error);
+}
+export async function deleteComment(id) {
+  const { error } = await sb.from("comments").delete().eq("id", id);
+  fail(error);
+}
+export async function report(uid, target, reason) {
+  const { error } = await sb.from("reports").insert({ reporter_id: uid, reason, ...target });
+  fail(error);
+}
+export async function activity() {
+  const { data, error } = await sb.rpc("my_activity");
+  fail(error);
+  return data;
+}
+
+// ---------- shared boards ----------
+export async function sharedBoards() {
+  const { data, error } = await sb.rpc("my_shared_boards");
+  fail(error);
+  return data.map((b) => ({ ...b, people: Number(b.people), item_count: Number(b.item_count) }));
+}
+export async function createSharedBoard(uid, title) {
+  const { data, error } = await sb.from("boards").insert({ owner_id: uid, kind: "shared", title }).select("id").single();
+  fail(error);
+  return data.id;
+}
+export async function renameBoard(boardId, title) {
+  const { error } = await sb.from("boards").update({ title }).eq("id", boardId);
+  fail(error);
+}
+export async function deleteBoard(boardId) {
+  const { error } = await sb.from("boards").delete().eq("id", boardId);
+  fail(error);
+}
+export async function boardPeople(boardId) {
+  const { data, error } = await sb.rpc("board_people", { p_board: boardId });
+  fail(error);
+  return data;
+}
+export async function invite(boardId, username, role = "editor") {
+  const p = await profileByUsername(username.replace(/^@/, ""));
+  if (!p) throw new Error("no one has that username yet");
+  const { error } = await sb.from("board_members").insert({ board_id: boardId, user_id: p.id, role });
+  if (error?.code === "23505") throw new Error("they're already on this board");
+  fail(error);
+  return p;
+}
+export async function removeMember(boardId, userId) {
+  const { error } = await sb.from("board_members").delete().eq("board_id", boardId).eq("user_id", userId);
+  fail(error);
+}
+
+// ---------- live ----------
+// calls onChange({ type: 'upsert'|'delete', item }) for changes to this board's items,
+// and onPeople([{ uid, name }]) with who has the board open right now.
+export function watchBoard(boardId, me, onChange, onPeople) {
+  const ch = sb.channel(`board:${boardId}`, { config: { presence: { key: me.id } } });
+  ch.on("postgres_changes", { event: "*", schema: "public", table: "items", filter: `board_id=eq.${boardId}` }, (msg) => {
+    if (msg.eventType === "DELETE") onChange({ type: "delete", item: { id: msg.old.id } });
+    else { const r = msg.new; onChange({ type: "upsert", item: { ...r.data, id: r.id, type: r.type, z: r.z, _author: r.author_id } }); }
+  });
+  ch.on("presence", { event: "sync" }, () => {
+    const st = ch.presenceState();
+    onPeople(Object.values(st).map((arr) => arr[0]).filter(Boolean));
+  });
+  ch.subscribe(async (status) => {
+    if (status === "SUBSCRIBED") await ch.track({ uid: me.id, name: me.name || "someone" });
+  });
+  return () => { sb.removeChannel(ch); };
+}

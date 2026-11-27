@@ -109,10 +109,15 @@
 <section id="app" class="app" hidden>
   <header class="top">
     <button class="title" id="titleBtn" title="rename your diary"></button>
-    <nav class="datenav">
+    <nav class="datenav" id="dateNav">
       <button class="icon" id="prevDay" aria-label="previous day">‹</button>
       <button class="date" id="dateBtn"><span id="dateMain"></span><small id="dateYear"></small></button>
       <button class="icon" id="nextDay" aria-label="next day">›</button>
+    </nav>
+    <nav class="boardhead" id="boardHead" hidden>
+      <button class="icon" id="boardBack" aria-label="back">‹</button>
+      <button class="bh-title" id="boardTitle"></button>
+      <button class="bh-people" id="boardPeopleBtn"><span id="boardFaces"></span><small id="boardLive"></small></button>
     </nav>
     <div class="top-right">
       <span class="status" id="status"><i></i><span>saved</span></span>
@@ -120,6 +125,8 @@
       <button class="chip round" id="menuBtn" aria-label="account">•••</button>
     </div>
   </header>
+
+  <main class="page" id="page" hidden></main>
 
   <main class="stage" id="stage">
     <div class="board-wrap" id="boardWrap">
@@ -136,10 +143,19 @@
   <footer class="dock">
     <div class="bar" id="mainBar">
       <button data-act="add" class="add"><b>＋</b>add</button>
-      <button data-act="board"><b>◐</b>board</button>
+      <button data-act="board" id="bgBtn"><b>◐</b>board</button>
+      <button data-act="people" id="peopleBtn" hidden><b>☺</b>people</button>
+      <button data-act="post" id="postBtn"><b>↗</b><span>post</span></button>
     </div>
     <div class="bar ctx" id="ctxBar" hidden></div>
   </footer>
+
+  <nav class="tabbar" id="tabbar">
+    <a href="#today" data-tab="diary"><b>▦</b>diary</a>
+    <a href="#feed" data-tab="feed"><b>✦</b>feed</a>
+    <a href="#together" data-tab="together"><b>❀</b>together</a>
+    <a href="#me" data-tab="me"><b>☺</b>me</a>
+  </nav>
 
   <input type="file" id="fileIn" accept="image/*" multiple hidden>
 </section>
@@ -173,6 +189,47 @@
     <label class="chip jump">jump to <input type="date" id="jumpDate"></label>
   </div>
   <div class="days-list" id="daysList"></div>
+</div>
+
+<div class="sheet" id="postSheet" hidden>
+  <div class="sheet-head"><h3 id="postTitle">post this board</h3><button class="x" data-close>✕</button></div>
+  <p class="sheet-note" id="postNote">the board stays live: anything you add later shows up on your post too.</p>
+  <textarea id="postCaption" class="field" rows="3" maxlength="500" placeholder="write a caption…"></textarea>
+  <div class="seg" id="postVis">
+    <button data-vis="followers" class="on"><b>followers</b><small>people who follow you</small></button>
+    <button data-vis="public"><b>everyone</b><small>shows in explore</small></button>
+  </div>
+  <div class="edit-row">
+    <button class="chip danger-chip" id="unpostBtn" hidden>take it down</button>
+    <span class="spacer"></span>
+    <button class="btn-primary small" id="postGo">post</button>
+  </div>
+</div>
+
+<div class="sheet" id="peopleSheet" hidden>
+  <div class="sheet-head"><h3>on this board</h3><button class="x" data-close>✕</button></div>
+  <div class="invite-row" id="inviteRow">
+    <input id="inviteIn" class="field" placeholder="invite by @username" autocomplete="off" autocapitalize="off">
+    <button class="btn-primary small" id="inviteGo">invite</button>
+  </div>
+  <div class="people-list" id="peopleList"></div>
+  <div class="menu-list" id="boardMenu"></div>
+</div>
+
+<div class="sheet" id="profileSheet" hidden>
+  <div class="sheet-head"><h3 id="profileSheetTitle">your profile</h3><button class="x" data-close>✕</button></div>
+  <p class="sheet-note" id="profileSheetNote"></p>
+  <div class="avatar-edit">
+    <button class="avatar xl" id="avatarPick" title="change photo"></button>
+    <div class="avatar-edit-fields">
+      <label class="f dark"><span>username</span><input id="pfUsername" autocomplete="off" autocapitalize="off" maxlength="24" placeholder="e.g. mia.tan"></label>
+      <label class="f dark"><span>name</span><input id="pfName" maxlength="40"></label>
+    </div>
+  </div>
+  <label class="f dark"><span>bio</span><textarea id="pfBio" class="field" rows="2" maxlength="280"></textarea></label>
+  <p class="auth-err" id="pfErr"></p>
+  <div class="edit-row"><span class="spacer"></span><button class="btn-primary small" id="pfSave">save</button></div>
+  <input type="file" id="avatarIn" accept="image/*" hidden>
 </div>
 
 <div class="sheet" id="menuSheet" hidden>
