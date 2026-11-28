@@ -191,8 +191,17 @@ $("#authForm").addEventListener("submit", async (e) => {
 // ---------------- boot + routing ----------------
 let booted = false;
 async function boot() {
+  // invite links: remember the code until they're signed in
+  const jm = location.hash.match(/^#join\/([a-z0-9]{6,20})$/i);
+  if (jm) { try { localStorage.setItem("pendingInvite", jm[1].toLowerCase()); } catch {} }
   const user = await db.currentUser().catch(() => null);
-  if (!user) return showAuth();
+  if (!user) {
+    showAuth();
+    let pending = null;
+    try { pending = localStorage.getItem("pendingInvite"); } catch {}
+    if (pending) { setAuthMode("signup"); community.showInviteBanner(pending); }
+    return;
+  }
   S.user = { id: user.id, email: user.email, name: user.user_metadata?.name || "" };
   try {
     S.me = await db.myProfile(user.id);
@@ -204,6 +213,10 @@ async function boot() {
   renderTitle();
   community.renderMeTab();
   booted = true;
+  $("#inviteBanner").hidden = true;
+  const joined = await community.redeemPending();
+  if (joined?.board_id) { location.hash = "#b/" + joined.board_id; return; }
+  if (joined || /^#join\//.test(location.hash)) { location.hash = "#feed"; return; }
   await route();
 }
 db.onAuthChange((event, user) => {
@@ -213,6 +226,7 @@ db.onAuthChange((event, user) => {
 
 async function route() {
   if (!S.user) return;
+  if (!$("#scrim").hidden) closeSheets();
   const h = decodeURIComponent(location.hash.slice(1));
   if (/^\d{4}-\d{2}-\d{2}$/.test(h)) return openDay(h);
   if (h === "" || h === "today") return openDay(today());
@@ -224,6 +238,8 @@ async function route() {
   if (h === "me") return community.mePage();
   if (h.startsWith("@")) return community.profilePage(h.slice(1).toLowerCase());
   if (h.startsWith("p/")) return community.postPage(h.slice(2));
+  if (h.startsWith("recap")) return community.recapPage(h.slice(6));
+  if (h.startsWith("join/")) { location.hash = "#feed"; return; }
   return openDay(today());
 }
 window.addEventListener("hashchange", () => { if (S.user) route(); });
@@ -415,6 +431,8 @@ $("#jumpDate").onchange = (e) => { if (e.target.value) { closeSheets(); openDay(
 async function openDays() {
   openSheet("#daysSheet");
   $("#jumpDate").value = S.date;
+  $("#recapLink").href = "#recap/" + S.date.slice(0, 7);
+  $("#recapLink").onclick = () => closeSheets();
   const list = $("#daysList");
   list.innerHTML = `<p class="days-empty">loading…</p>`;
   try {
@@ -823,6 +841,7 @@ $("#mainBar").addEventListener("click", (e) => {
   const a = b.dataset.act;
   if (a === "add") openAdd();
   if (a === "post") community.openPostSheet();
+  if (a === "story") community.storyForCurrentBoard();
   if (a === "people") community.openPeople();
   if (a === "board" && S.isOwner) {
     S.day.board = cycle(BOARDS, S.day.board);
@@ -838,6 +857,7 @@ function choosePhotosFor(frame) {
   pendingFrame = frame;
   closeSheets();
   if (frame === "booth") toast(`pick up to ${BOOTH_MAX} photos for the strip`, null, null, 4000);
+  if (frame === "ai") toast(`pick up to ${AI_MAX} photos and i'll design the board`, null, null, 4000);
   $("#fileIn").click();
 }
 
@@ -853,6 +873,7 @@ $("#fileIn").addEventListener("change", async (e) => {
   e.target.value = "";
   if (!files.length) return;
   const frame = pendingFrame;
+  if (frame === "ai") return openAiSheet(files);
 
   if (frame === "booth") {
     if (files.length > BOOTH_MAX) {
@@ -945,7 +966,8 @@ function renderAddTab() {
   let h = "";
   if (addTab === "photos") {
     g.className = "grid g-photos";
-    h = allFrames().filter((k) => !(restyle && k === "booth")).map((k) => {
+    const aiTile = restyle ? "" : `<button class="tile ai-tile" data-frame="ai"><span class="ai-spark">✦</span><b>ai arrange</b><small>pick photos, get a finished board</small></button>`;
+    h = aiTile + allFrames().filter((k) => !(restyle && k === "booth")).map((k) => {
       if (k === "booth") return tile(`data-frame="booth"`, boothInner({ src: [PH_SRC, PH_SRC, PH_SRC], tone: "bw" }, today()), "photobooth", 46, 150);
       const fr = FRAMES2[k];
       const width = fr ? Math.min(120, 120 * (fr.w / fr.h) > 120 ? 120 : 112 * (fr.w / fr.h) + 10) : k === "egg" ? 86 : 92;
@@ -1319,6 +1341,202 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); removeItem(it); }
 });
 
+
+// ---------------- AI arrange ----------------
+const AI_MAX = 8;
+const VIBES = ["cozy sunday", "y2k digicam", "soft pink", "film camera", "summer core", "night out", "study date", "chrome + silver"];
+let aiFiles = [];
+function openAiSheet(files) {
+  aiFiles = files.slice(0, AI_MAX);
+  if (files.length > AI_MAX) toast(`i'll use the first ${AI_MAX} photos`);
+  $("#aiThumbs").innerHTML = aiFiles.map((f) => `<img src="${URL.createObjectURL(f)}" alt="">`).join("");
+  $("#aiVibe").value = "";
+  $("#aiVibes").innerHTML = VIBES.map((v) => `<button type="button" class="chip" data-vibe="${esc(v)}">${esc(v)}</button>`).join("");
+  const hasItems = S.day.items.length > 0;
+  $("#aiMode").hidden = !hasItems;
+  $("#aiMode").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.mode === "add"));
+  openSheet("#aiSheet");
+}
+$("#aiVibes").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-vibe]");
+  if (b) $("#aiVibe").value = b.dataset.vibe;
+});
+$("#aiMode").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-mode]");
+  if (b) $("#aiMode").querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
+});
+$("#aiGo").addEventListener("click", async () => {
+  const files = aiFiles;
+  if (!files.length) return;
+  const vibe = $("#aiVibe").value.trim();
+  const fresh = !$("#aiMode").hidden && $("#aiMode .on")?.dataset.mode === "fresh";
+  closeSheets();
+  const overlay = $("#aiWorking");
+  overlay.hidden = false;
+  $("#aiWorkingText").textContent = "uploading your photos…";
+  try {
+    // upload the photos (needed either way) and make small copies for the AI to look at
+    const photos = [];
+    for (let i = 0; i < files.length; i++) {
+      $("#aiWorkingText").textContent = `uploading photo ${i + 1} of ${files.length}…`;
+      const up = await uploadPhoto(files[i]);
+      const small = await compress(files[i], 640, 0.72);
+      photos.push({ ...up, data: await blobToDataUrl(small.blob) });
+    }
+    $("#aiWorkingText").textContent = "designing your board…";
+    let layout = null, usedAi = true;
+    try {
+      layout = await db.ai({ mode: "board", vibe, date: prettyDate(S.date || today()), photos: photos.map((p) => ({ data: p.data })), catalog: aiCatalog() });
+    } catch (err) {
+      usedAi = false;
+      if (err.code === "daily_limit") toast("you've used today's ai boards, here's a quick layout instead");
+      else if (err.code !== "ai_not_configured") console.warn("ai arrange failed", err);
+    }
+    let items = layout ? buildAiItems(layout, photos) : [];
+    if (!items.some((i) => i.type === "photo" || i.type === "booth")) { items = fallbackLayout(photos, vibe); usedAi = false; }
+    applyGenerated(items, layout?.board, fresh, usedAi);
+  } catch (err) {
+    toast("couldn't make the board: " + (err.message || err));
+  } finally {
+    overlay.hidden = true;
+  }
+});
+function blobToDataUrl(blob) {
+  return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(blob); });
+}
+function prettyDate(d) { const x = parseYmd(d); return `${DOW_LONG[x.getDay()]} ${x.getDate()} ${MON[x.getMonth()]} ${x.getFullYear()}`; }
+function aiCatalog() {
+  return {
+    frames: allFrames().filter((k) => k !== "booth").map((k) => ({ id: k, name: frameName(k) })),
+    booth_tones: BOOTH_TONES,
+    papers: allPapers().filter((k) => k !== "label").map((k) => ({ id: k, name: paperName(k) })),
+    fonts: FONTS.filter((f) => f.id).map((f) => ({ id: f.id, name: f.name })),
+    inks: Object.keys(INKS).filter(Boolean),
+    word_styles: TEXT_FX,
+    stickers: Object.values(LIB).map((d) => ({ id: d.id, name: d.name, group: d.cat })),
+    backgrounds: BOARDS,
+  };
+}
+const num = (v, lo, hi, d) => { const n = Number(v); return Number.isFinite(n) ? clamp(n, lo, hi) : d; };
+const oneOf = (v, list, d) => (list.includes(v) ? v : d);
+// turn the AI's plan into real board items, refusing anything that doesn't exist
+function buildAiItems(layout, photos) {
+  const frames = allFrames().filter((k) => k !== "booth");
+  const papers = allPapers();
+  const fonts = FONTS.map((f) => f.id).filter(Boolean);
+  const used = new Set();
+  const out = [];
+  for (const raw of (layout.items || []).slice(0, 40)) {
+    if (!raw || typeof raw !== "object") continue;
+    const base = { id: uid(), x: num(raw.x, -40, BW - 40, 100), y: num(raw.y, -40, BH - 40, 100), rot: num(raw.rot, -18, 18, 0), pinX: rand(-12, 12), pinR: rand(-8, 8) };
+    if (raw.type === "photo") {
+      const i = Math.round(num(raw.photo, 0, photos.length - 1, -1));
+      if (i < 0 || used.has(i) || !photos[i]) continue;
+      used.add(i);
+      const style = oneOf(raw.frame, frames, "polaroid");
+      const fr = FRAMES2[style];
+      out.push({ ...base, type: "photo", photo: photos[i].id, aspect: photos[i].aspect, style, bw: !!raw.bw,
+        caption: String(raw.caption || "").slice(0, 60), pin: fr || style === "egg" ? "none" : oneOf(raw.pin, PINS, "magnet"),
+        w: num(raw.w, 150, fr ? fr.base * 1.3 : 380, 260) });
+    } else if (raw.type === "booth") {
+      const idx = (Array.isArray(raw.photos) ? raw.photos : []).map((v) => Math.round(Number(v))).filter((v) => photos[v] && !used.has(v)).slice(0, BOOTH_MAX);
+      if (idx.length < 2) continue;
+      idx.forEach((v) => used.add(v));
+      out.push({ ...base, type: "booth", photos: idx.map((v) => photos[v].id), tone: oneOf(raw.tone, BOOTH_TONES, "bw"), pin: oneOf(raw.pin, PINS, "magnet"), w: num(raw.w, 120, 200, 160) });
+    } else if (raw.type === "note") {
+      const paper = oneOf(raw.paper, papers, "lined");
+      const p = PAPERS[paper] || CARDS[paper];
+      const text = String(raw.text || "").slice(0, 300);
+      if (!text) continue;
+      const it = { ...base, type: "note", paper, text, no: String(Math.floor(rand(1000, 99999))).padStart(5, "0"),
+        pin: CARDS[paper] ? "none" : oneOf(raw.pin, PINS, p.pin), w: num(raw.w, 140, 380, p.base) };
+      if (fonts.includes(raw.font)) it.font = raw.font;
+      if (raw.ink && INKS[raw.ink]) it.ink = raw.ink;
+      out.push(it);
+    } else if (raw.type === "text") {
+      const text = String(raw.text || "").slice(0, 60);
+      if (!text) continue;
+      out.push({ ...base, type: "text", text, font: oneOf(raw.font, fonts, "cherry"), ink: INKS[raw.ink] ? raw.ink : "black", fx: oneOf(raw.fx, TEXT_FX, "sticker"), w: num(raw.w, 160, 520, 300) });
+    } else if (raw.type === "sticker") {
+      if (!LIB[raw.kind]) continue;
+      out.push({ ...base, type: "sticker", kind: raw.kind, w: num(raw.w, 36, 180, LIB[raw.kind].base) });
+    }
+  }
+  // any photo the AI forgot still goes on the board
+  photos.forEach((p, i) => {
+    if (used.has(i)) return;
+    const w = rand(220, 270), pos = spotAmong(out, w, w * 1.3);
+    out.push({ id: uid(), type: "photo", photo: p.id, aspect: p.aspect, style: "polaroid", bw: false, caption: "", pin: "magnet", pinX: rand(-12, 12), pinR: rand(-8, 8), x: pos.x, y: pos.y, w, rot: rand(-7, 7) });
+  });
+  return out;
+}
+// a tasteful layout without AI: photos in a loose staggered grid, a headline, a note, a few stickers
+function fallbackLayout(photos, vibe) {
+  const out = [];
+  const n = photos.length;
+  const cols = n <= 2 ? 2 : n <= 4 ? 2 : 3;
+  const cellW = (BW - 80) / cols;
+  const rows = Math.ceil(n / cols);
+  const cellH = (BH - 340) / Math.max(rows, 1);
+  const frameSet = ["polaroid", "polaroid", "print", "cam-silver", "egg", "polaroid", "print", "cam-pink"];
+  photos.forEach((p, i) => {
+    const c = i % cols, r = Math.floor(i / cols);
+    const style = frameSet[i % frameSet.length];
+    const fr = FRAMES2[style];
+    const w = Math.min(cellW * 0.92, fr ? fr.base : 300) * rand(0.9, 1.02);
+    const h = fr ? (w * fr.h) / fr.w : style === "polaroid" ? w * 1.3 : w * p.aspect;
+    out.push({ id: uid(), type: "photo", photo: p.id, aspect: p.aspect, style, bw: false, caption: "",
+      pin: fr || style === "egg" ? "none" : i % 3 === 2 ? "tape" : "magnet", pinX: rand(-12, 12), pinR: rand(-8, 8),
+      x: 40 + c * cellW + (cellW - w) / 2 + rand(-20, 20) + (r % 2 ? 18 : -18), y: 170 + r * cellH + Math.max(0, (cellH - h) / 2) + rand(-15, 15), w, rot: rand(-7, 7) });
+  });
+  const d = dateBits(S.date || today());
+  out.push({ id: uid(), type: "text", text: vibe || `${d.dow} ${d.d} ${d.mon}`, font: "cherry", ink: "pink", fx: "sticker", x: 60, y: 40, w: 340, rot: -4 });
+  out.push({ id: uid(), type: "note", paper: pick(["cc-scallop", "cc-oval", "sticky", "postcard"]), text: pick(["a day worth keeping", "remember this feeling", "little moments, big heart", "more days like this please"]),
+    no: "00214", pin: "none", x: BW - 330, y: BH - 290, w: 300, rot: 3 });
+  const cat = pick(["stars", "charms", "buttons"]);
+  const pool = Object.values(LIB).filter((x) => x.cat === cat);
+  const spots = [[20, 1080], [800, 40], [820, 600], [40, 640], [420, 1100], [700, 1080]];
+  spots.forEach(([x, y]) => { const st = pick(pool); out.push({ id: uid(), type: "sticker", kind: st.id, x, y, w: st.base * rand(0.8, 1.1), rot: rand(-15, 15) }); });
+  return out;
+}
+function spotAmong(items, w, h) {
+  let best = { x: 40, y: 40 }, score = -1;
+  for (let k = 0; k < 30; k++) {
+    const c = { x: 20 + Math.random() * (BW - w - 40), y: 20 + Math.random() * (BH - h - 40) };
+    const s = items.length ? Math.min(...items.map((o) => Math.hypot(o.x - c.x, o.y - c.y))) : 1;
+    if (s > score) { score = s; best = c; }
+  }
+  return best;
+}
+function applyGenerated(items, board, fresh, usedAi) {
+  const before = { items: S.day.items.slice(), board: S.day.board };
+  if (fresh) {
+    S.els.forEach((el) => el.remove());
+    S.els.clear();
+    S.day.items = [];
+  }
+  if (S.isOwner && BOARDS.includes(board) && (fresh || !before.items.length)) S.day.board = board;
+  $("#board").className = "board bg-" + S.day.board;
+  let z = maxZ();
+  items.forEach((it, i) => {
+    it.z = ++z;
+    S.day.items.push(it);
+    const el = mount(it);
+    el.classList.add("drop");
+    el.style.animationDelay = `${i * 70}ms`;
+    setTimeout(() => el.classList.remove("drop"), 900 + i * 70);
+  });
+  select(null);
+  changed();
+  toast(usedAi ? "✦ your board is ready" : "here's a layout to start from", "undo", () => {
+    S.els.forEach((el) => el.remove());
+    S.els.clear();
+    S.day.items = before.items;
+    S.day.board = before.board;
+    renderBoard();
+    changed();
+  }, 7000);
+}
 
 community.init({
   db, S, esc, inner, pinHtml, baseOf, hydratePhotos, toast, openSheet, closeSheets, setView, leaveBoard, route, flush,

@@ -26,6 +26,10 @@ Live at **https://karisa.space**
 - **Magnets and comments:** a magnet is a like. Comments can be deleted by whoever wrote them or by the post's owner.
 - **Together:** shared memory boards. Create one, tap **people** and invite friends by @username. Everyone on the board can add and move things, and changes show up on everyone's screen live. Green rings show who has it open.
 - **Me:** profile with posts and tagged grids, edit profile, share profile.
+- **✦ AI arrange:** add → photos → *ai arrange*. Pick up to 8 photos and an optional vibe; Claude (Sonnet 5.5, via the `ai-arrange` edge function) looks at the photos and designs the board: frames, a photobooth strip for similar shots, a headline, a short note and matching stickers. Everything it suggests is checked against the real catalog before it's placed, and there's an undo. Each person gets 20 AI boards a day (`AI_DAILY_LIMIT`). Without an API key it falls back to a built-in layout.
+- **Share to Instagram story:** the ◎ story button on a board, "share" on a post, or the button on a recap makes a 1080×1920 image. On a phone the share menu opens straight to Instagram → Story.
+- **Invites (Clubhouse-style):** everyone gets 5 personal invites (me → invite friends). An invite link shows who invited you on the sign-up screen; accepting it makes you follow each other, and profiles show "invited by @…". Board owners can share a link that adds people straight to a shared board (up to 25 people, 30 days).
+- **Monthly recaps:** a calendar of the month's boards with stats and an AI-written one-liner, shareable as a story. Linked from the days list, the profile, and a banner on home during the first week of each month.
 - **Safety:** diaries are private unless posted. Posts, comments and profiles can be reported; reports land in the `reports` table (Supabase → Table Editor) for you to review.
 
 ```
@@ -63,6 +67,16 @@ Open http://localhost:3000. It talks to the live Supabase project, so use a test
 | `comments` | comments on posts |
 | `post_tags` | people tagged in posts |
 | `reports` | reports filed by people, for you to review |
+| `invites`, `invite_redemptions` | invite links and who used them |
+| `ai_usage` | AI boards made per person per day (server only) |
+
+## AI setup
+
+The AI needs an Anthropic API key, stored as a Supabase secret (never in the website):
+
+1. Get a key at https://console.anthropic.com (API keys).
+2. Supabase → project **karisa** → Edge Functions → Secrets → add `ANTHROPIC_API_KEY`.
+3. Optional: `AI_MODEL` (default `claude-sonnet-5-5`) and `AI_DAILY_LIMIT` (default 20).
 
 ## Supabase settings to check
 

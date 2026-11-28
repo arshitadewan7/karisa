@@ -6,6 +6,7 @@ const $ = (s, r = document) => r.querySelector(s);
 export function init(deps) {
   D = deps;
   wireSheets();
+  wireStorySheet();
   window.addEventListener("resize", () => scaleMinis(document));
 }
 
@@ -166,7 +167,8 @@ function wireTagSearch() {
       try {
         const people = (await D.db.searchPeople(q)).filter((p) => p.id !== D.S.user.id && !tagPicks.some((x) => x.id === p.id));
         out.innerHTML = people.slice(0, 6).map((p, i) => `<button class="person" data-pick="${i}">${avatar(p, "s")}<span><b>${esc(nameOf(p))}</b><small>@${esc(p.username)}</small></span></button>`).join("")
-          || `<p class="muted pad-s">no one found</p>`;
+          || `<p class="muted pad-s">no one found. <button class="mention" id="tagInvite">invite them to magnet diary</button></p>`;
+        const ti = $("#tagInvite"); if (ti) ti.onclick = () => openInviteSheet();
         out.querySelectorAll("[data-pick]").forEach((b) => (b.onclick = () => {
           if (tagPicks.length >= 20) return D.toast("that's a lot of tags! 20 max");
           tagPicks.push(people[+b.dataset.pick]);
@@ -300,6 +302,7 @@ export async function feedPage() {
       <h1 class="wordmark">magnet <em>diary</em></h1>
       <a class="icon-btn" href="#activity" aria-label="activity">${ICON.heart}</a>
     </header>
+    ${recapBanner()}
     <div class="stories" id="stories"></div>
     <div class="cards" id="cards">${loading()}</div>
     <div class="center pad"><button class="chip" id="moreBtn" hidden>load more</button></div>`, "home");
@@ -388,7 +391,11 @@ function wireCards(root, posts) {
     const btn = card.querySelector("[data-magnet]");
     btn.onclick = () => toggleMagnet(p, card);
     card.querySelector("[data-menu]").onclick = () => postMenu(p);
-    card.querySelector("[data-share]").onclick = () => shareLink(`#p/${p.post_id}`, `${p.username}'s magnet board`);
+    card.querySelector("[data-share]").onclick = () => actions("share", [
+      { label: "share to instagram story", run: () => shareBoardStory({ items: p.items, bg: p.background, date: postDate(p),
+          top: `${boardLabel(p)}`, title: p.board_kind === "shared" ? (p.board_title || "memories") : `@${p.username}` }) },
+      { label: "copy link", run: () => shareLink(`#p/${p.post_id}`, `${p.username}'s magnet board`) },
+    ]);
     // double-tap the board for a magnet, single tap opens the post
     const board = card.querySelector("[data-board]");
     let tapT = 0, tapTimer = null;
@@ -444,6 +451,7 @@ function postMenu(p) {
     } });
     list.push({ label: "report this post", danger: true, run: () => reportMenu({ post_id: p.post_id }, "post") });
   }
+  list.push({ label: "share to instagram story", run: () => shareBoardStory({ items: p.items, bg: p.background, date: postDate(p), top: boardLabel(p), title: p.board_kind === "shared" ? (p.board_title || "memories") : `@${p.username}` }) });
   list.push({ label: "copy link", run: () => shareLink(`#p/${p.post_id}`, "magnet board") });
   actions("post", list);
 }
@@ -487,17 +495,17 @@ export async function activityPage() {
   $("#pgBack").onclick = () => (history.length > 1 ? history.back() : (location.hash = "#feed"));
   try {
     const list = await D.db.activity();
-    const words = { follow: "started following you.", magnet: "gave your board a magnet.", comment: "commented:", invite: "added you to", tag: "tagged you in a post." };
+    const words = { joined: "joined from your invite. you follow each other now.", follow: "started following you.", magnet: "gave your board a magnet.", comment: "commented:", invite: "added you to", tag: "tagged you in a post." };
     const groups = [["today", 86400e3], ["this week", 7 * 86400e3], ["earlier", Infinity]];
     let html = "", gi = 0, cur = null;
     for (const a of list) {
       const age = Date.now() - new Date(a.at).getTime();
       while (age > groups[gi][1]) gi++;
       if (cur !== gi) { cur = gi; html += `<h4 class="act-h">${groups[gi][0]}</h4>`; }
-      const href = a.kind === "follow" ? `#@${a.username}` : a.kind === "invite" ? `#b/${a.board_id}` : `#p/${a.post_id}`;
+      const href = a.kind === "follow" || a.kind === "joined" ? `#@${a.username}` : a.kind === "invite" ? `#b/${a.board_id}` : `#p/${a.post_id}`;
       const extra = a.kind === "comment" ? ` ${linkify(a.body || "")}` : a.kind === "invite" ? ` <b>${esc(a.body || "a memory board")}</b>.` : "";
       html += `<a class="act-row" href="${esc(href)}">${avatar(a)}<span><b>${esc(a.username || nameOf(a))}</b> ${words[a.kind]}${extra} <small>${ago(a.at)}</small></span>
-        ${a.kind === "follow" ? `<span class="chip">view</span>` : a.kind === "invite" ? `<span class="chip">open</span>` : `<span class="act-ic">${a.kind === "magnet" ? ICON.magnetOn : a.kind === "tag" ? ICON.tag : ICON.comment}</span>`}</a>`;
+        ${a.kind === "follow" || a.kind === "joined" ? `<span class="chip">view</span>` : a.kind === "invite" ? `<span class="chip">open</span>` : `<span class="act-ic">${a.kind === "magnet" ? ICON.magnetOn : a.kind === "tag" ? ICON.tag : ICON.comment}</span>`}</a>`;
     }
     $("#actList").innerHTML = html || `<section class="empty-page small"><p>nothing yet. when people follow you, give your boards magnets, comment, tag you or add you to a board, it shows up here.</p></section>`;
   } catch { $("#actList").innerHTML = `<p class="muted">couldn't load activity.</p>`; }
@@ -574,19 +582,24 @@ export async function profilePage(username) {
       <p class="prof-name">${esc(p.display_name || p.username)}</p>
       ${p.bio ? `<p class="bio">${linkify(p.bio)}</p>` : ""}
       ${!own && p.follows_me ? `<p class="muted small">follows you</p>` : ""}
+      ${p.invited_by_username ? `<p class="muted small">invited by <a class="mention" href="#@${esc(p.invited_by_username)}">@${esc(p.invited_by_username)}</a>${p.invited_count ? ` · brought ${p.invited_count} ${p.invited_count == 1 ? "friend" : "friends"}` : ""}</p>`
+        : p.invited_count ? `<p class="muted small">brought ${p.invited_count} ${p.invited_count == 1 ? "friend" : "friends"} to magnet diary</p>` : ""}
       <div class="prof-actions">
-        ${own ? `<button class="btn-soft" id="editProf">edit profile</button><button class="btn-soft" id="shareProf">share profile</button>`
+        ${own ? `<button class="btn-soft" id="editProf">edit profile</button><button class="btn-soft primary" id="inviteBtn">invite friends</button><button class="btn-soft" id="recapBtn">recaps</button>`
               : `<button class="btn-soft ${p.i_follow ? "" : "primary"}" id="followBtn">${p.i_follow ? "following" : p.follows_me ? "follow back" : "follow"}</button><button class="btn-soft" id="shareProf">share profile</button>`}
       </div>
     </section>
     <nav class="ptabs"><button class="on" data-pt="posts">${ICON.grid}</button><button data-pt="tagged">${ICON.tagged}</button></nav>
     <div class="pgrid" id="pgrid">${loading()}</div>`;
   if (!own) $("#pgBack").onclick = () => history.back();
-  $("#shareProf").onclick = () => shareLink(`#@${p.username}`, `@${p.username} on magnet diary`);
+  if ($("#shareProf")) $("#shareProf").onclick = () => shareLink(`#@${p.username}`, `@${p.username} on magnet diary`);
   if (own) {
+    $("#inviteBtn").onclick = () => openInviteSheet();
+    $("#recapBtn").onclick = () => (location.hash = "#recap/" + lastMonthKey());
     $("#editProf").onclick = () => openProfileSheet(false, () => profilePage(D.S.me.username));
     $("#profMenu").onclick = () => actions("account", [
       { label: "activity", run: () => (location.hash = "#activity") },
+      { label: "share my profile", run: () => shareLink(`#@${p.username}`, `@${p.username} on magnet diary`) },
       { label: "account settings", run: () => D.openMenu() },
     ]);
   } else {
@@ -626,7 +639,7 @@ export async function togetherPage() {
   if (!(await ensureUsername(() => togetherPage()))) return;
   const el = page(`
     <header class="app-head"><span class="icon-btn"></span><h2 class="ph">together</h2><span class="icon-btn"></span></header>
-    <p class="muted page-sub">memory boards you make with friends. everyone on a board can add photos, notes and stickers, live.</p>
+    <p class="muted page-sub">memory boards you make with friends. everyone on a board can add photos, notes and stickers, live. add friends by @username, or share an invite link from the board's people menu.</p>
     <form class="new-board" id="newBoard"><input id="nbTitle" class="field" maxlength="80" placeholder="name a new board, e.g. beach trip '26"><button class="btn-primary small">create</button></form>
     <div class="tlist" id="tlist">${loading()}</div>`, "together");
   $("#newBoard").onsubmit = async (e) => {
@@ -653,6 +666,8 @@ export async function openPeople() {
   if (!info) return;
   const owner = info.my_role === "owner";
   $("#inviteRow").hidden = !owner;
+  $("#boardLinkBtn").hidden = !owner;
+  $("#boardLinkBtn").onclick = () => shareBoardInvite();
   $("#inviteIn").value = "";
   $("#boardMenu").innerHTML = owner
     ? `<button id="bmRename">rename board</button><button id="bmDelete" class="danger">delete this board</button>`
@@ -700,4 +715,264 @@ async function doInvite() {
     renderPeople();
   } catch (e) { D.toast(String(e.message || e).toLowerCase()); }
   finally { $("#inviteGo").disabled = false; }
+}
+
+// =====================================================================
+// share to instagram story
+// =====================================================================
+let storyBlob = null, storyName = "magnet-diary.png", toBlobFn = null;
+async function loadRenderer() {
+  if (!toBlobFn) toBlobFn = (await import("/vendor/html-to-image.js")).toBlob;
+  return toBlobFn;
+}
+async function inlineImages(root) {
+  await D.hydratePhotos(root);
+  const imgs = [...root.querySelectorAll("img")];
+  await Promise.all(imgs.map(async (img) => {
+    const src = img.getAttribute("src") || "";
+    if (!src || src.startsWith("data:")) return;
+    try {
+      const blob = await fetch(src, { mode: "cors" }).then((r) => r.blob());
+      img.src = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(blob); });
+    } catch { /* leave it */ }
+  }));
+  await Promise.all(imgs.map((img) => (img.complete ? null : new Promise((r) => { img.onload = img.onerror = r; }))));
+}
+// renders a 1080x1920 story image. `inner` is the middle of the story (a board or a recap grid)
+async function renderStory(inner, top, title) {
+  const host = document.createElement("div");
+  host.className = "story-host";
+  host.innerHTML = `<div class="story-canvas">
+      <div class="st-glow"></div>
+      <header class="st-head"><small>${esc(top)}</small><h1>${esc(title)}</h1></header>
+      <div class="st-mid">${inner}</div>
+      <footer class="st-foot"><span>@${esc(D.S.me?.username || "")}</span><b>magnet <em>diary</em></b><span>karisa.space</span></footer>
+    </div>`;
+  document.body.appendChild(host);
+  try {
+    scaleMinis(host);
+    await inlineImages(host);
+    try { await document.fonts.ready; } catch {}
+    const toBlob = await loadRenderer();
+    const node = host.firstElementChild;
+    const opts = { width: 1080, height: 1920, pixelRatio: 1, cacheBust: false };
+    let blob;
+    try {
+      await toBlob(node, opts); // first pass warms up fonts and images (needed on safari)
+      blob = await toBlob(node, opts);
+    } catch (e) {
+      console.warn("story fonts failed, retrying without web fonts", e);
+      blob = await toBlob(node, { ...opts, skipFonts: true });
+    }
+    return blob;
+  } finally { host.remove(); }
+}
+async function openStory(make, name) {
+  D.toast("making your story…", null, null, 20000);
+  try {
+    storyBlob = await make();
+    storyName = name;
+    $("#storyPreview").innerHTML = `<img src="${URL.createObjectURL(storyBlob)}" alt="story preview">`;
+    D.toast("ready", null, null, 800);
+    D.openSheet("#storySheet");
+  } catch (e) {
+    console.error(e);
+    D.toast("couldn't make the story image");
+  }
+}
+export function shareBoardStory({ items, bg, date, title, top, username }) {
+  return openStory(
+    () => renderStory(`<div class="st-board">${miniBoard(items, bg, date)}</div>`, top || "", title || ""),
+    `magnet-diary-${date || "board"}.png`);
+}
+function wireStorySheet() {
+  $("#storyShare").onclick = async () => {
+    if (!storyBlob) return;
+    const file = new File([storyBlob], storyName, { type: "image/png" });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: "magnet diary" }); return; }
+      catch (e) { if (e.name === "AbortError") return; }
+    }
+    saveStory();
+  };
+  $("#storySave").onclick = saveStory;
+}
+function saveStory() {
+  if (!storyBlob) return;
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(storyBlob);
+  a.download = storyName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  D.toast("saved. add it to your story from your photos.");
+}
+// story for the board that's open right now
+export function storyForCurrentBoard() {
+  const S = D.S;
+  if (!S.day.items.length) { D.toast("pin something first"); return; }
+  const isDay = S.ctx?.kind === "day";
+  const date = isDay ? S.date : new Date().toISOString().slice(0, 10);
+  const d = D.parseYmd(date);
+  return shareBoardStory({
+    items: S.day.items, bg: S.day.board, date,
+    top: isDay ? (S.title || "magnet diary") + ` · ${d.getFullYear()}` : "our memory board",
+    title: isDay ? `${D.DOW_LONG[d.getDay()]} ${d.getDate()} ${D.MON[d.getMonth()]}` : (S.ctx?.info?.title || "memories"),
+  });
+}
+
+// =====================================================================
+// invites (clubhouse-style: everyone gets a few, profiles say who invited you)
+// =====================================================================
+const inviteUrl = (code) => `${location.origin}/#join/${code}`;
+export async function showInviteBanner(code) {
+  const el = $("#inviteBanner");
+  try {
+    const p = await D.db.invitePreview(code);
+    if (!p) { el.hidden = false; el.innerHTML = `<p>that invite link doesn't exist. you can still make an account.</p>`; return; }
+    if (!p.valid) { el.hidden = false; el.innerHTML = `<p>that invite has been used up. ask @${esc(p.username || "your friend")} for a new one.</p>`; return; }
+    el.hidden = false;
+    el.innerHTML = `${avatar(p, "s")}<p><b>@${esc(p.username || nameOf(p))}</b> invited you${p.board_title ? ` to <b>${esc(p.board_title)}</b>` : " to magnet diary"}</p>`;
+  } catch { el.hidden = true; }
+}
+export async function redeemPending() {
+  let code = null;
+  try { code = localStorage.getItem("pendingInvite"); } catch {}
+  if (!code) return null;
+  try { localStorage.removeItem("pendingInvite"); } catch {}
+  try {
+    const r = await D.db.redeemInvite(code);
+    if (!r) return null;
+    if (r.ok && r.message !== "already accepted" && r.inviter_username) D.toast(`you're in! you and @${r.inviter_username} now follow each other`, null, null, 5000);
+    else if (!r.ok && r.message !== "that's your own invite") D.toast(r.message);
+    return r.ok ? r : null;
+  } catch { return null; }
+}
+export async function openInviteSheet() {
+  if (!(await ensureUsername(() => openInviteSheet()))) return;
+  const body = $("#inviteBody");
+  body.innerHTML = loading();
+  D.openSheet("#inviteSheet");
+  const render = async () => {
+    const [left, list] = await Promise.all([D.db.invitesLeft(D.S.user.id), D.db.myInvites()]);
+    body.innerHTML = `
+      <div class="ticket">
+        <div class="ticket-l"><small>you have</small><b>${left}</b><small>${left === 1 ? "invite" : "invites"} left</small></div>
+        <div class="ticket-r"><p>magnet diary grows friend by friend. each invite brings one person in, and you'll follow each other.</p>
+          <button class="btn-primary small" id="newInvite" ${left ? "" : "disabled"}>${left ? "create an invite" : "no invites left"}</button></div>
+      </div>
+      ${list.length ? `<h4 class="act-h">your invites</h4>` : ""}
+      <div class="inv-list">${list.map((i) => {
+        const used = (i.used_by || [])[0];
+        const expired = new Date(i.expires_at) < new Date();
+        return `<div class="inv-row">${used ? avatar(used, "s") : `<span class="inv-dot">✦</span>`}
+          <span>${used ? `<b>@${esc(used.username || nameOf(used))}</b> joined` : expired ? "expired" : "not used yet"}<small>${ago(i.created_at)}</small></span>
+          ${!used && !expired ? `<button class="chip" data-share-inv="${esc(i.code)}">share</button>` : ""}</div>`;
+      }).join("")}</div>`;
+    const go = $("#newInvite");
+    if (go) go.onclick = async () => {
+      go.disabled = true;
+      try { const inv = await D.db.createInvite(); await render(); shareLink(`#join/${inv.code}`, "join me on magnet diary"); }
+      catch (e) { D.toast(String(e.message || e)); go.disabled = false; }
+    };
+    body.querySelectorAll("[data-share-inv]").forEach((b) => (b.onclick = () => shareLink(`#join/${b.dataset.shareInv}`, "join me on magnet diary")));
+  };
+  try { await render(); } catch { body.innerHTML = `<p class="muted">couldn't load your invites.</p>`; }
+}
+export async function shareBoardInvite() {
+  const info = D.S.ctx?.info;
+  if (!info) return;
+  try {
+    const inv = await D.db.createInvite(info.id);
+    shareLink(`#join/${inv.code}`, `join our board "${info.title || "memories"}" on magnet diary`);
+  } catch (e) { D.toast("couldn't make a link: " + e.message); }
+}
+
+// =====================================================================
+// monthly recap
+// =====================================================================
+const MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+const monthKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+export function lastMonthKey() { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return monthKey(d); }
+function recapStats(boards) {
+  let photos = 0, notes = 0, stickers = 0, magnets = 0;
+  const texts = [];
+  for (const b of boards) {
+    magnets += b.magnets;
+    for (const it of b.items) {
+      if (it.type === "photo") photos++;
+      else if (it.type === "booth") photos += (it.photos || []).length;
+      else if (it.type === "note" || it.type === "text") { notes++; if (it.text) texts.push(it.text); }
+      else stickers++;
+    }
+  }
+  return { days: boards.length, photos, notes, stickers, magnets, texts };
+}
+function fallbackLine(st, monthName) {
+  if (!st.days) return `${monthName} is waiting for its first magnet.`;
+  return `${st.days} ${st.days === 1 ? "day" : "days"}, ${st.photos} ${st.photos === 1 ? "photo" : "photos"} and ${st.stickers} little stickers. a ${monthName} worth keeping.`;
+}
+export async function recapPage(key = lastMonthKey()) {
+  if (!/^\d{4}-\d{2}$/.test(key)) key = lastMonthKey();
+  const [y, m] = key.split("-").map(Number);
+  const first = new Date(y, m - 1, 1);
+  const monthName = MONTHS[m - 1];
+  const prev = monthKey(new Date(y, m - 2, 1)), next = monthKey(new Date(y, m, 1));
+  const isFuture = new Date(y, m - 1, 1) > new Date();
+  const el = page(`
+    <header class="app-head"><button class="icon-btn" id="pgBack" aria-label="back">${ICON.back}</button><h2 class="ph">recap</h2><span class="icon-btn"></span></header>
+    <section class="recap">
+      <div class="recap-nav"><a class="chip" href="#recap/${prev}">‹ ${MONTHS[new Date(y, m - 2, 1).getMonth()]}</a>${monthKey(new Date()) >= next ? `<a class="chip" href="#recap/${next}">${MONTHS[new Date(y, m, 1).getMonth()]} ›</a>` : "<span></span>"}</div>
+      <p class="recap-kicker">${y} recap</p>
+      <h1 class="recap-title" id="rcTitle">${monthName}</h1>
+      <p class="recap-line" id="rcLine">…</p>
+      <div class="recap-stats" id="rcStats"></div>
+      <div class="cal" id="rcCal">${loading()}</div>
+      <div class="center pad"><button class="btn-primary small" id="rcShare">◎ share to story</button></div>
+    </section>`, "me");
+  $("#pgBack").onclick = () => (history.length > 1 ? history.back() : (location.hash = "#me"));
+  if (isFuture) { $("#rcCal").innerHTML = `<p class="muted center">this month hasn't happened yet.</p>`; return; }
+  let boards = [];
+  try { boards = await D.db.monthBoards(`${key}-01`); } catch { $("#rcCal").innerHTML = `<p class="muted center">couldn't load this month.</p>`; return; }
+  const st = recapStats(boards);
+  $("#rcStats").innerHTML = [["days pinned", st.days], ["photos", st.photos], ["notes", st.notes], ["stickers", st.stickers], ["magnets", st.magnets]]
+    .map(([k, v]) => `<span><b>${v}</b>${k}</span>`).join("");
+  // calendar
+  const byDay = new Map(boards.map((b) => [Number(b.day.slice(8, 10)), b]));
+  const lead = (first.getDay() + 6) % 7; // weeks start monday
+  const daysIn = new Date(y, m, 0).getDate();
+  let cells = ["m", "t", "w", "t", "f", "s", "s"].map((d) => `<span class="cal-h">${d}</span>`).join("");
+  for (let i = 0; i < lead; i++) cells += `<span class="cal-c empty"></span>`;
+  for (let d = 1; d <= daysIn; d++) {
+    const b = byDay.get(d);
+    const date = `${key}-${String(d).padStart(2, "0")}`;
+    cells += b ? `<a class="cal-c on" href="#${date}">${miniBoard(b.items, b.background, date)}<i>${d}</i></a>` : `<span class="cal-c"><i>${d}</i></span>`;
+  }
+  $("#rcCal").innerHTML = cells;
+  afterRender($("#rcCal"));
+  // the one-line summary: ai if available, cached per month
+  const cacheKey = `recap-${D.S.user.id}-${key}`;
+  let head = null;
+  try { head = JSON.parse(localStorage.getItem(cacheKey) || "null"); } catch {}
+  const setHead = (h) => { if (h?.title) $("#rcTitle").textContent = h.title; $("#rcLine").textContent = h?.line || fallbackLine(st, monthName); };
+  if (head) setHead(head);
+  else if (st.days >= 2) {
+    setHead(null);
+    D.db.ai({ mode: "recap", recap: { month: `${monthName} ${y}`, days: st.days, photos: st.photos, notesCount: st.notes, notes: st.texts.slice(0, 30) } })
+      .then((h) => { if (h?.line) { try { localStorage.setItem(cacheKey, JSON.stringify(h)); } catch {} setHead(h); } })
+      .catch(() => {});
+  } else setHead(null);
+  $("#rcShare").onclick = () => {
+    if (!boards.length) return D.toast("pin a few days first");
+    const pickB = boards.length <= 9 ? boards : boards.filter((_, i) => i % Math.ceil(boards.length / 9) === 0).slice(0, 9);
+    const grid = `<div class="st-grid n${Math.min(pickB.length, 9)}">${pickB.map((b) => `<div class="st-cell">${miniBoard(b.items, b.background, b.day)}<i>${Number(b.day.slice(8, 10))}</i></div>`).join("")}</div>
+      <div class="st-stats">${[["days", st.days], ["photos", st.photos], ["stickers", st.stickers]].map(([k, v]) => `<span><b>${v}</b>${k}</span>`).join("")}</div>`;
+    openStory(() => renderStory(grid, `${y} recap`, $("#rcTitle").textContent || monthName), `magnet-diary-${key}.png`);
+  };
+}
+export function recapBanner() {
+  const d = new Date();
+  if (d.getDate() > 7) return "";
+  const key = lastMonthKey();
+  return `<a class="recap-banner" href="#recap/${key}"><span class="rb-spark">✦</span><span><b>your ${MONTHS[Number(key.slice(5)) - 1]} recap is ready</b><small>see your month on one page and share it</small></span><span class="rb-go">›</span></a>`;
 }

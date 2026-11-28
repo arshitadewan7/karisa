@@ -309,3 +309,52 @@ export function watchBoard(boardId, me, onChange, onPeople) {
   });
   return () => { sb.removeChannel(ch); };
 }
+
+// ---------- AI ----------
+export async function ai(body) {
+  const { data, error } = await sb.functions.invoke("ai-arrange", { body });
+  if (error) {
+    let info = {};
+    try { info = await error.context.json(); } catch {}
+    throw Object.assign(new Error(info.error || error.message || "ai failed"), { code: info.error, status: error.context?.status });
+  }
+  return data;
+}
+
+// ---------- invites ----------
+export async function createInvite(boardId = null) {
+  const { data, error } = await sb.rpc("create_invite", { p_board: boardId });
+  if (error && /no invites left/.test(error.message)) throw new Error("no invites left");
+  fail(error);
+  return data[0];
+}
+export async function invitePreview(code) {
+  const { data, error } = await sb.rpc("invite_preview", { p_code: code });
+  fail(error);
+  return data[0] || null;
+}
+export async function redeemInvite(code) {
+  const { data, error } = await sb.rpc("redeem_invite", { p_code: code });
+  fail(error);
+  return data[0];
+}
+export async function myInvites() {
+  const { data, error } = await sb.rpc("my_invites");
+  fail(error);
+  return data;
+}
+export async function invitesLeft(uid) {
+  const { data, error } = await sb.from("profiles").select("invites_left").eq("id", uid).single();
+  fail(error);
+  return data.invites_left;
+}
+
+// ---------- recaps ----------
+export async function monthBoards(monthDate) {
+  const { data, error } = await sb.rpc("month_boards", { p_month: monthDate });
+  fail(error);
+  return data.map((b) => ({
+    day: b.day, background: b.background, post_id: b.post_id, magnets: Number(b.magnets || 0),
+    items: (b.items || []).map((r) => ({ ...r.data, id: r.id, type: r.type, z: r.z })),
+  }));
+}

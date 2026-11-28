@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" href="/icon-180.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Mono:wght@400;500&family=Gochi+Hand&family=Caveat:wght@500;700&family=Kalam&family=Special+Elite&family=VT323&family=Reenie+Beanie&family=Oswald:wght@500;700&family=Rubik+Mono+One&family=Homemade+Apple&family=Nothing+You+Could+Do&family=Shadows+Into+Light&family=La+Belle+Aurore&family=Mrs+Saint+Delafield&family=Pinyon+Script&family=Playfair+Display:ital@1&family=Cherry+Bomb+One&family=Rubik+Bubbles&family=Courier+Prime&family=Silkscreen&display=swap" rel="stylesheet">
+<link crossorigin="anonymous" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Mono:wght@400;500&family=Gochi+Hand&family=Caveat:wght@500;700&family=Kalam&family=Special+Elite&family=VT323&family=Reenie+Beanie&family=Oswald:wght@500;700&family=Rubik+Mono+One&family=Homemade+Apple&family=Nothing+You+Could+Do&family=Shadows+Into+Light&family=La+Belle+Aurore&family=Mrs+Saint+Delafield&family=Pinyon+Script&family=Playfair+Display:ital@1&family=Cherry+Bomb+One&family=Rubik+Bubbles&family=Courier+Prime&family=Silkscreen&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -88,6 +88,7 @@
 <section id="auth" class="auth" hidden>
   <div class="auth-card">
     <div class="auth-magnet"></div>
+    <div class="invite-banner" id="inviteBanner" hidden></div>
     <h1 class="brand">magnet <em>diary</em></h1>
     <p class="auth-sub">a silver board for every day of your life</p>
     <div class="tabs" role="tablist">
@@ -146,6 +147,7 @@
       <button data-act="board" id="bgBtn"><b>◐</b>board</button>
       <button data-act="people" id="peopleBtn" hidden><b>☺</b>people</button>
       <button data-act="post" id="postBtn"><b>↗</b><span>post</span></button>
+      <button data-act="story" id="storyBtn"><b>◎</b>story</button>
     </div>
     <div class="bar ctx" id="ctxBar" hidden></div>
   </footer>
@@ -187,6 +189,7 @@
   <div class="sheet-head"><h3>your days</h3><button class="x" data-close>✕</button></div>
   <div class="days-tools">
     <button class="chip" id="todayBtn">today</button>
+    <a class="chip" id="recapLink" href="#recap">✦ monthly recap</a>
     <label class="chip jump">jump to <input type="date" id="jumpDate"></label>
   </div>
   <div class="days-list" id="daysList"></div>
@@ -216,12 +219,44 @@
   </div>
 </div>
 
+<div class="sheet" id="aiSheet" hidden>
+  <div class="sheet-head"><h3>✦ ai arrange</h3><button class="x" data-close>✕</button></div>
+  <div class="ai-thumbs" id="aiThumbs"></div>
+  <label class="tag-label">what's the vibe? (optional)</label>
+  <input id="aiVibe" class="field" maxlength="120" placeholder="e.g. cozy sunday with the girls" autocomplete="off">
+  <div class="vibe-chips" id="aiVibes"></div>
+  <div class="seg" id="aiMode" hidden>
+    <button data-mode="add" class="on"><b>add to my board</b><small>keep what's there</small></button>
+    <button data-mode="fresh"><b>start fresh</b><small>replace this board</small></button>
+  </div>
+  <div class="edit-row"><span class="sheet-note small">claude picks frames, stickers and writes a little note</span><span class="spacer"></span><button class="btn-primary small" id="aiGo">✦ make my board</button></div>
+</div>
+
+<div class="sheet" id="storySheet" hidden>
+  <div class="sheet-head"><h3>share to story</h3><button class="x" data-close>✕</button></div>
+  <div class="story-preview" id="storyPreview"></div>
+  <div class="edit-row">
+    <button class="chip" id="storySave">save image</button>
+    <span class="spacer"></span>
+    <button class="btn-primary small" id="storyShare">share</button>
+  </div>
+  <p class="sheet-note small center">on your phone, pick instagram → story in the share menu.</p>
+</div>
+
+<div class="sheet" id="inviteSheet" hidden>
+  <div class="sheet-head"><h3>invite friends</h3><button class="x" data-close>✕</button></div>
+  <div id="inviteBody"></div>
+</div>
+
+<div class="ai-working" id="aiWorking" hidden><div class="ai-orb"></div><p id="aiWorkingText">designing your board…</p></div>
+
 <div class="sheet" id="peopleSheet" hidden>
   <div class="sheet-head"><h3>on this board</h3><button class="x" data-close>✕</button></div>
   <div class="invite-row" id="inviteRow">
-    <input id="inviteIn" class="field" placeholder="invite by @username" autocomplete="off" autocapitalize="off">
-    <button class="btn-primary small" id="inviteGo">invite</button>
+    <input id="inviteIn" class="field" placeholder="add by @username" autocomplete="off" autocapitalize="off">
+    <button class="btn-primary small" id="inviteGo">add</button>
   </div>
+  <button class="link-row" id="boardLinkBtn" hidden>🔗 share an invite link (anyone with it can join this board)</button>
   <div class="people-list" id="peopleList"></div>
   <div class="menu-list" id="boardMenu"></div>
 </div>
