@@ -24,6 +24,7 @@ export const ICON = {
   back: svg(`<path d="M15 4 7 12l8 8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`),
   search: svg(`<circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m15.5 15.5 5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>`),
   plus: svg(`<path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`),
+  ticket: svg(`<path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h15A1.5 1.5 0 0 1 21 7.5V10a2 2 0 0 0 0 4v2.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 16.5V14a2 2 0 0 0 0-4Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M14.5 6.5v2M14.5 11v2M14.5 15.5v2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>`),
 };
 
 // ---------------- small helpers ----------------
@@ -297,39 +298,107 @@ export async function openPostSheet() {
 export async function feedPage() {
   if (!(await ensureUsername(() => feedPage()))) return;
   renderMeTab();
+  const now = new Date();
+  const hr = now.getHours();
+  const hello = hr < 5 ? "up late" : hr < 12 ? "good morning" : hr < 18 ? "good afternoon" : "good evening";
+  const me = D.S.me || {};
   const el = page(`
-    <header class="app-head">
-      <h1 class="wordmark">magnet <em>diary</em></h1>
+    <header class="app-head home-head">
+      <div class="hh-text">
+        <small class="hh-date">${D.DOW_LONG[now.getDay()]} ${now.getDate()} ${D.MON[now.getMonth()]}</small>
+        <h1 class="wordmark">magnet <em>diary</em></h1>
+      </div>
+      <button class="icon-btn" id="homeInvite" aria-label="invite friends">${ICON.ticket}</button>
       <a class="icon-btn" href="#activity" aria-label="activity">${ICON.heart}</a>
     </header>
+    <p class="hello">${hello}${me.display_name || me.username ? `, ${esc((me.display_name || me.username).split(" ")[0].toLowerCase())}` : ""}</p>
+    <section class="today-card" id="todayCard">${todayCard(null)}</section>
     ${recapBanner()}
-    <div class="stories" id="stories"></div>
+    <section class="fridge" id="fridge" hidden>
+      <h3 class="sec">on the fridge <small>friends' latest boards</small></h3>
+      <div class="fridge-row" id="fridgeRow"></div>
+    </section>
+    <h3 class="sec" id="feedSec" hidden>latest</h3>
     <div class="cards" id="cards">${loading()}</div>
     <div class="center pad"><button class="chip" id="moreBtn" hidden>load more</button></div>`, "home");
+  $("#homeInvite", el).onclick = () => openInviteSheet();
+  Promise.all([D.db.listDays(), D.db.loadDay(D.S.user.id, ymdOf(now)).catch(() => null)]).then(([days, today]) => {
+    const c = $("#todayCard");
+    if (!c || !c.isConnected) return;
+    c.innerHTML = todayCard(days, today);
+    afterRender(c);
+  }).catch(() => {});
   let before = null, all = [];
   const load = async () => {
     const posts = await D.db.feed({ kind: "following", before });
     all = all.concat(posts);
     const cards = $("#cards", el);
     if (!before) cards.innerHTML = "";
-    if (!posts.length && !before) cards.innerHTML = await emptyFeed();
+    if (!posts.length && !before) {
+      cards.innerHTML = await emptyFeed();
+      const b = cards.querySelector("[data-empty-invite]"); if (b) b.onclick = () => openInviteSheet();
+    }
+    $("#feedSec", el).hidden = !all.length;
     cards.insertAdjacentHTML("beforeend", posts.map((p) => cardHtml(p)).join(""));
     wireCards(cards, posts);
     afterRender(cards);
-    if (!before) renderStories(all);
+    if (!before) renderFridge(all);
     before = posts.length ? posts[posts.length - 1].created_at : before;
     $("#moreBtn", el).hidden = posts.length < 20;
   };
   $("#moreBtn", el).onclick = load;
   try { await load(); } catch { $("#cards", el).innerHTML = `<p class="muted center pad">couldn't load the feed.</p>`; }
 }
-function renderStories(posts) {
+const ymdOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+function streakOf(days) {
+  const set = new Set(days.filter((d) => d.count > 0).map((d) => d.date));
+  const d = new Date();
+  if (!set.has(ymdOf(d))) d.setDate(d.getDate() - 1);
+  let n = 0;
+  while (set.has(ymdOf(d))) { n++; d.setDate(d.getDate() - 1); }
+  return n;
+}
+function todayCard(days, today) {
+  const t = ymdOf(new Date());
+  const day = days && days.find((d) => d.date === t);
+  const count = day ? day.count : 0;
+  const streak = days ? streakOf(days) : 0;
+  const total = days ? days.filter((d) => d.count > 0).length : 0;
+  const status = !days ? "&nbsp;" : count ? `${count} ${count === 1 ? "thing" : "things"} pinned so far` : streak ? "pin something to keep your streak" : "nothing pinned yet";
+  const items = today && today.items ? today.items : [];
+  const photo = items.length
+    ? miniBoard(items, today.background, t)
+    : day && day.preview
+      ? `<span class="tc-pola"><img data-photo="${esc(day.preview)}" src="${D.BLANK}" alt=""><i class="tc-pin"></i></span>`
+      : `<span class="tc-empty">${ICON.plus}</span>`;
+  return `
+    <div class="tc-text">
+      <small>today's board</small>
+      <h2>${count ? "keep it going" : "what's on today?"}</h2>
+      <p>${status}</p>
+      <div class="tc-stats">
+        ${streak ? `<span class="tc-stat hot">🔥 <b>${streak}</b> day streak</span>` : ""}
+        ${total ? `<span class="tc-stat"><b>${total}</b> ${total === 1 ? "day" : "days"} kept</span>` : ""}
+      </div>
+      <a class="tc-go" href="#today">${count ? "open board" : "start pinning"} <span aria-hidden="true">→</span></a>
+    </div>
+    <a class="tc-board metal ${items.length ? "has-mini" : ""}" href="#today" aria-label="open today's board">${photo}<span class="tc-sheen"></span></a>`;
+}
+function renderFridge(posts) {
   const seen = new Set(), list = [];
   for (const p of posts) if (p.author_id !== D.S.user.id && !seen.has(p.author_id)) { seen.add(p.author_id); list.push(p); }
-  const me = D.S.me || {};
-  $("#stories").innerHTML = `
-    <a class="story me" href="#today"><span class="ring plain">${avatar(me, "story")}<i class="story-plus">${ICON.plus}</i></span><small>your board</small></a>
-    ${list.slice(0, 20).map((p) => `<a class="story" href="#p/${p.post_id}"><span class="ring">${avatar(p, "story")}</span><small>${esc(p.username || "")}</small></a>`).join("")}`;
+  const box = $("#fridge");
+  if (!box) return;
+  box.hidden = !list.length;
+  if (!list.length) return;
+  const t = ymdOf(new Date());
+  const row = $("#fridgeRow");
+  row.innerHTML = list.slice(0, 20).map((p) => `
+    <a class="fridge-tile" href="#p/${p.post_id}">
+      <span class="ft-board">${miniBoard(p.items || [], p.background, postDate(p))}${p.board_day === t ? `<i class="ft-new">today</i>` : ""}</span>
+      <span class="ft-who"><span class="ring sm">${avatar(p)}</span><small>${esc(p.username || "")}</small></span>
+    </a>`).join("");
+  afterRender(row);
 }
 async function emptyFeed() {
   let suggest = [];
@@ -338,9 +407,13 @@ async function emptyFeed() {
     const seen = new Set();
     for (const p of ex) if (p.author_id !== D.S.user.id && !seen.has(p.author_id)) { seen.add(p.author_id); suggest.push(p); }
   } catch {}
-  return `<section class="empty-page small"><h2>welcome in</h2><p>follow friends to see their boards here. your own posts show up here too.</p>
-    ${suggest.length ? `<div class="suggest">${suggest.slice(0, 8).map((p) => `<a class="person" href="#@${esc(p.username)}">${avatar(p)}<span><b>${esc(nameOf(p))}</b><small>@${esc(p.username)}</small></span><span class="chip">view</span></a>`).join("")}</div>` : ""}
-    <a class="chip" href="#explore">explore boards</a></section>`;
+  return `<section class="empty-home">
+    <div class="eh-art" aria-hidden="true"><span class="eh-m a"></span><span class="eh-m b"></span><span class="eh-m c"></span></div>
+    <h2>your fridge is empty</h2>
+    <p>boards from friends land here. bring a few in, or follow people you like.</p>
+    <div class="eh-btns"><button class="btn-pill light" data-empty-invite>${ICON.ticket} invite friends</button><a class="btn-pill" href="#explore">${ICON.search} explore</a></div>
+    ${suggest.length ? `<h3 class="sec left">people to follow</h3><div class="suggest">${suggest.slice(0, 6).map((p) => `<a class="person" href="#@${esc(p.username)}">${avatar(p)}<span><b>${esc(nameOf(p))}</b><small>@${esc(p.username)}</small></span><span class="chip">view</span></a>`).join("")}</div>` : ""}
+  </section>`;
 }
 
 function magnetLine(p) {
