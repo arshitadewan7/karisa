@@ -110,6 +110,15 @@ export async function uploadPhoto(uid, blob) {
   fail(error);
   return path;
 }
+// live photos: a short clip next to its still photo
+export async function uploadClip(uid, blob) {
+  const type = (blob.type || "video/mp4").split(";")[0];
+  const ext = type === "video/webm" ? "webm" : type === "video/quicktime" ? "mov" : "mp4";
+  const path = `${uid}/${crypto.randomUUID()}.${ext}`;
+  const { error } = await sb.storage.from("photos").upload(path, blob, { contentType: type, cacheControl: "31536000" });
+  fail(error);
+  return path;
+}
 export async function signPhotos(paths) {
   if (!paths.length) return {};
   const { data, error } = await sb.storage.from("photos").createSignedUrls(paths, 60 * 60 * 12);

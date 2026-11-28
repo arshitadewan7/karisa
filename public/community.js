@@ -821,6 +821,7 @@ async function renderStory(inner, top, title) {
       <div class="st-mid">${inner}</div>
       <footer class="st-foot"><span>@${esc(D.S.me?.username || "")}</span><b>magnet <em>diary</em></b><span>karisa.space</span></footer>
     </div>`;
+  host.querySelectorAll("video").forEach((v) => v.remove());
   document.body.appendChild(host);
   try {
     scaleMinis(host);

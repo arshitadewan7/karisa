@@ -120,7 +120,8 @@ let hydrating = null;
 // fill every <img data-photo> on the page with a signed link, fetching missing ones in one go
 async function hydratePhotos(root = document) {
   const imgs = [...root.querySelectorAll("img[data-photo]")];
-  const missing = [...new Set(imgs.map((i) => i.dataset.photo).filter((p) => p && !photoUrl(p)))];
+  const vids = [...root.querySelectorAll("video[data-live]")].filter(liveAllowed);
+  const missing = [...new Set([...imgs.map((i) => i.dataset.photo), ...vids.map((v) => v.dataset.live)].filter((p) => p && !photoUrl(p)))];
   if (missing.length) {
     try {
       const got = await db.signPhotos(missing);
@@ -131,6 +132,20 @@ async function hydratePhotos(root = document) {
     const u = photoUrl(img.dataset.photo);
     if (u && img.getAttribute("src") !== u) img.src = u;
   }
+  for (const v of vids) {
+    const u = photoUrl(v.dataset.live);
+    if (u && v.getAttribute("src") !== u) { v.src = u; watchLive(v); }
+  }
+}
+// live photos move on the board and in feed posts; small thumbnails stay still
+function liveAllowed(v) { return !!v.closest("#board, .card-board") && !v.closest(".story-host"); }
+const liveIO = "IntersectionObserver" in window ? new IntersectionObserver((es) => {
+  for (const e of es) { const v = e.target; if (e.isIntersecting) v.play().catch(() => {}); else v.pause(); }
+}, { threshold: 0.15 }) : null;
+function watchLive(v) {
+  v.muted = true; v.loop = true; v.playsInline = true;
+  v.addEventListener("playing", () => v.classList.add("on"), { once: true });
+  if (liveIO) liveIO.observe(v); else v.play().catch(() => {});
 }
 function queueHydrate() {
   if (hydrating) return;
@@ -689,7 +704,8 @@ function boothInner(it, date) {
     <div class="booth-foot"><span>★</span><span>${b.dd}·${b.mm}·${String(b.y).slice(2)}</span><span>★</span></div></div>`;
 }
 function photoInner(it) {
-  const img = it.photo || it.src ? imgTag(it.photo, it.src) : "";
+  const img = (it.photo || it.src ? imgTag(it.photo, it.src) : "")
+    + (it.live ? `<video data-live="${esc(it.live)}" muted loop playsinline preload="none" disablepictureinpicture></video><span class="live-tag"><i></i>live</span>` : "");
   const bw = it.bw ? " bw" : "";
   const fr = FRAMES2[it.style];
   if (fr) {
@@ -976,6 +992,95 @@ $("#fileIn").addEventListener("change", async (e) => {
   toast(files.length > 1 ? `${files.length} photos pinned` : "photo pinned");
 });
 
+// ---------------- live photos ----------------
+// keeps the first 3 seconds, shrinks it to ~540px and re-encodes it so it stays small
+const LIVE_SECS = 3;
+$("#liveIn").addEventListener("change", async (e) => {
+  const f = e.target.files[0];
+  e.target.value = "";
+  if (!f) return;
+  toast("making it live…", null, null, 60000);
+  try {
+    const { clip, poster, w, h } = await makeClip(f);
+    const [photo, live] = await Promise.all([db.uploadPhoto(S.user.id, poster), db.uploadClip(S.user.id, clip)]);
+    URLS.set(photo, { url: URL.createObjectURL(poster), at: Date.now() });
+    URLS.set(live, { url: URL.createObjectURL(clip), at: Date.now() });
+    const iw = rand(240, 290), aspect = h / w;
+    const p = spot(iw, iw * 1.3);
+    addItem({ id: uid(), type: "photo", photo, live, aspect, style: "polaroid", bw: false, caption: "",
+      pin: "magnet", pinX: rand(-12, 12), pinR: rand(-8, 8), x: p.x, y: p.y, w: iw, rot: rand(-6, 6) });
+    hydratePhotos($("#board"));
+    toast("live photo pinned");
+  } catch (err) {
+    if (err.message !== "signed out") toast(err.message || "couldn't make that live");
+  }
+});
+async function makeClip(file) {
+  const v = document.createElement("video");
+  v.muted = true; v.playsInline = true; v.preload = "auto";
+  v.setAttribute("playsinline", ""); v.setAttribute("muted", "");
+  v.src = URL.createObjectURL(file);
+  v.style.cssText = "position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0";
+  document.body.appendChild(v);
+  try {
+    await new Promise((res, rej) => {
+      v.onloadedmetadata = res;
+      v.onerror = () => rej(new Error("couldn't read that video"));
+      setTimeout(() => rej(new Error("couldn't read that video")), 15000);
+    });
+    const w0 = v.videoWidth, h0 = v.videoHeight;
+    if (!w0 || !h0) throw new Error("couldn't read that video");
+    const s = Math.min(1, 540 / Math.max(w0, h0));
+    const c = document.createElement("canvas");
+    c.width = Math.round((w0 * s) / 2) * 2;
+    c.height = Math.round((h0 * s) / 2) * 2;
+    const ctx = c.getContext("2d");
+    const types = ["video/mp4;codecs=avc1.42E01E", "video/mp4", "video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
+    const type = window.MediaRecorder && c.captureStream && types.find((t) => MediaRecorder.isTypeSupported(t));
+    let clip = null, poster = null;
+    if (type) {
+      const rec = new MediaRecorder(c.captureStream(30), { mimeType: type, videoBitsPerSecond: 1_600_000 });
+      const chunks = [];
+      rec.ondataavailable = (ev) => ev.data.size && chunks.push(ev.data);
+      const stopped = new Promise((r) => (rec.onstop = r));
+      const end = Math.min(v.duration || LIVE_SECS, LIVE_SECS);
+      v.currentTime = 0;
+      await v.play();
+      ctx.drawImage(v, 0, 0, c.width, c.height);
+      rec.start(250);
+      const t0 = performance.now();
+      await new Promise((done) => {
+        const tick = () => {
+          ctx.drawImage(v, 0, 0, c.width, c.height);
+          if (!poster && v.currentTime > 0.15) poster = new Promise((r) => c.toBlob(r, "image/jpeg", 0.86));
+          if (v.ended || v.currentTime >= end || performance.now() - t0 > (end + 3) * 1000) return done();
+          v.requestVideoFrameCallback ? v.requestVideoFrameCallback(tick) : requestAnimationFrame(tick);
+        };
+        tick();
+      });
+      v.pause();
+      rec.stop();
+      await stopped;
+      clip = new Blob(chunks, { type: type.split(";")[0] });
+      if (clip.size < 2000) clip = null;
+    }
+    if (!clip) {
+      // this browser can't re-encode: use the original if it's short and small enough
+      if ((v.duration || 0) > 6 || file.size > 14 * 1024 * 1024) throw new Error("that video is too long. try one under 6 seconds");
+      clip = file;
+      v.currentTime = Math.min(0.2, (v.duration || 1) / 2);
+      await new Promise((r) => { v.onseeked = r; setTimeout(r, 1500); });
+      ctx.drawImage(v, 0, 0, c.width, c.height);
+    }
+    poster = (await poster) || (await new Promise((r) => c.toBlob(r, "image/jpeg", 0.86)));
+    if (!poster) throw new Error("couldn't read that video");
+    return { clip, poster, w: c.width, h: c.height };
+  } finally {
+    v.remove();
+    URL.revokeObjectURL(v.src);
+  }
+}
+
 async function compress(file, max, q, square = false) {
   let src;
   try { src = await createImageBitmap(file, { imageOrientation: "from-image" }); }
@@ -1024,7 +1129,8 @@ function renderAddTab() {
   if (addTab === "photos") {
     g.className = "grid g-photos";
     const aiTile = restyle ? "" : `<button class="tile ai-tile" data-frame="ai"><span class="ai-spark">✦</span><b>ai arrange</b><small>pick photos, get a finished board</small></button>`;
-    h = aiTile + allFrames().filter((k) => !(restyle && k === "booth")).map((k) => {
+    const liveTile = restyle ? "" : `<button class="tile live-tile" data-frame="live"><span class="live-tag big"><i></i>live</span><b>live photo</b><small>film a few seconds or pick a video</small></button>`;
+    h = aiTile + liveTile + allFrames().filter((k) => !(restyle && k === "booth")).map((k) => {
       if (k === "booth") return tile(`data-frame="booth"`, boothInner({ src: [PH_SRC, PH_SRC, PH_SRC], tone: "bw" }, today()), "photobooth", 46, 150);
       const fr = FRAMES2[k];
       const width = fr ? Math.min(120, 120 * (fr.w / fr.h) > 120 ? 120 : 112 * (fr.w / fr.h) + 10) : k === "egg" ? 86 : 92;
@@ -1072,6 +1178,7 @@ $("#addGrid").addEventListener("click", (e) => {
     paint(it); place(it); renderCtx(); changed();
     return;
   }
+  if (d.frame === "live") { closeSheets(); $("#liveIn").click(); return; }
   if (d.frame) return choosePhotosFor(d.frame);
   closeSheets();
   if (d.paper) {
