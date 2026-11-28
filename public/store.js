@@ -53,9 +53,9 @@ export async function setDiaryTitle(uid, title) {
 
 // ---------- days ----------
 // a day's board, or null if nothing has been pinned that day
-export async function loadDay(uid, day) {
+export async function loadDay(uid, day, page = 1) {
   const { data: board, error } = await sb.from("boards").select("id, background")
-    .eq("owner_id", uid).eq("kind", "day").eq("day", day).maybeSingle();
+    .eq("owner_id", uid).eq("kind", "day").eq("day", day).eq("page", page).maybeSingle();
   fail(error);
   if (!board) return { boardId: null, background: "silver", items: [] };
   const { data: rows, error: e2 } = await sb.from("items").select("id, type, data, z, author_id").eq("board_id", board.id).order("z");
@@ -66,11 +66,11 @@ export async function loadDay(uid, day) {
     items: rows.map((r) => ({ ...r.data, id: r.id, type: r.type, z: r.z, _author: r.author_id })),
   };
 }
-export async function ensureDayBoard(uid, day, background) {
-  const { data, error } = await sb.from("boards").insert({ owner_id: uid, kind: "day", day, background }).select("id").single();
+export async function ensureDayBoard(uid, day, background, page = 1) {
+  const { data, error } = await sb.from("boards").insert({ owner_id: uid, kind: "day", day, page, background }).select("id").single();
   if (!error) return data.id;
   if (error.code !== "23505") fail(error);
-  const { data: again, error: e2 } = await sb.from("boards").select("id").eq("owner_id", uid).eq("kind", "day").eq("day", day).single();
+  const { data: again, error: e2 } = await sb.from("boards").select("id").eq("owner_id", uid).eq("kind", "day").eq("day", day).eq("page", page).single();
   fail(e2);
   return again.id;
 }
@@ -94,7 +94,13 @@ export async function deleteItems(ids) {
 export async function listDays() {
   const { data, error } = await sb.rpc("my_days");
   fail(error);
-  return data.map((d) => ({ date: d.day, count: Number(d.item_count), preview: d.preview }));
+  return data.map((d) => ({ date: d.day, count: Number(d.item_count), preview: d.preview, pages: Number(d.pages || 1) }));
+}
+// every board on one day: [{ id, page, count }]
+export async function dayPages(day) {
+  const { data, error } = await sb.rpc("day_pages", { p_day: day });
+  fail(error);
+  return data.map((b) => ({ id: b.board_id, page: b.page, count: Number(b.item_count) }));
 }
 
 // ---------- photos (private bucket, read through short-lived signed links) ----------
@@ -354,7 +360,7 @@ export async function monthBoards(monthDate) {
   const { data, error } = await sb.rpc("month_boards", { p_month: monthDate });
   fail(error);
   return data.map((b) => ({
-    day: b.day, background: b.background, post_id: b.post_id, magnets: Number(b.magnets || 0),
+    day: b.day, page: b.page || 1, background: b.background, post_id: b.post_id, magnets: Number(b.magnets || 0),
     items: (b.items || []).map((r) => ({ ...r.data, id: r.id, type: r.type, z: r.z })),
   }));
 }

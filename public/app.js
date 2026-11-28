@@ -228,7 +228,8 @@ async function route() {
   if (!S.user) return;
   if (!$("#scrim").hidden) closeSheets();
   const h = decodeURIComponent(location.hash.slice(1));
-  if (/^\d{4}-\d{2}-\d{2}$/.test(h)) return openDay(h);
+  const dm = h.match(/^(\d{4}-\d{2}-\d{2})(?:\/(\d{1,2}))?$/);
+  if (dm) return openDay(dm[1], dm[2] ? Math.max(1, Math.min(20, +dm[2])) : 1);
   if (h === "" || h === "today") return openDay(today());
   if (h.startsWith("b/")) return openBoard(h.slice(2));
   if (h === "feed" || h === "following" || h === "home") return community.feedPage();
@@ -256,6 +257,7 @@ function setView(kind, tab) {
   $("#status").hidden = !onBoard;
   $("#daysBtn").hidden = !isDay;
   $("#dateNav").hidden = !isDay;
+  $("#pageBar").hidden = !isDay;
   $("#boardHead").hidden = !(onBoard && !isDay);
   $("#bgBtn").hidden = !S.isOwner;
   $("#postBtn").hidden = !S.isOwner;
@@ -264,7 +266,9 @@ function setView(kind, tab) {
   if (onBoard) fit();
   else select(null);
 }
-function ctxKey() { return S.ctx?.kind === "day" ? "d:" + S.date : "b:" + S.boardId; }
+const dayKey = (date, page) => `d:${date}/${page || 1}`;
+function ctxKey() { return S.ctx?.kind === "day" ? dayKey(S.date, S.page) : "b:" + S.boardId; }
+const dayHash = (date, page) => "#" + date + (page > 1 ? "/" + page : "");
 
 // stop editing whatever board is open (save it, stop listening for friends' changes)
 function leaveBoard() {
@@ -284,17 +288,19 @@ function renderPostBtn() {
 }
 
 // ---------------- days ----------------
-async function openDay(date) {
+async function openDay(date, page = 1) {
   await flush();
   leaveBoard();
   S.ctx = { kind: "day", date };
   S.date = date;
+  S.page = page;
   S.isOwner = true;
   S.post = null;
   S.visibility = "private";
   select(null);
-  if (location.hash !== "#" + date) history.replaceState(null, "", "#" + date);
+  if (location.hash !== dayHash(date, page)) history.replaceState(null, "", dayHash(date, page));
   renderDate();
+  renderPages();
   S.day = { board: "silver", items: [] };
   S.boardId = null;
   S.saved = new Map();
@@ -303,8 +309,8 @@ async function openDay(date) {
   renderBoard();
   renderPostBtn();
   try {
-    const d = await db.loadDay(S.user.id, date);
-    if (ctxKey() !== "d:" + date) return;
+    const d = await db.loadDay(S.user.id, date, page);
+    if (ctxKey() !== dayKey(date, page)) return;
     S.boardId = d.boardId;
     S.day = { board: d.background || "silver", items: d.items };
     S.savedBoard = S.day.board;
@@ -314,7 +320,7 @@ async function openDay(date) {
     if (S.boardId) {
       startWatch(S.boardId);
       const [post, info] = await Promise.all([db.postForBoard(S.boardId), db.boardInfo(S.boardId)]);
-      if (ctxKey() !== "d:" + date) return;
+      if (ctxKey() !== dayKey(date, page)) return;
       S.post = post;
       S.visibility = info?.visibility || "private";
       renderPostBtn();
@@ -421,6 +427,56 @@ function renderDate() {
   $("#dateMain").textContent = isToday ? `today, ${d.getDate()} ${MON[d.getMonth()]}` : `${DOW_LONG[d.getDay()]} ${d.getDate()} ${MON[d.getMonth()]}`;
   $("#dateYear").textContent = d.getFullYear();
 }
+// ---------------- several boards on one day ----------------
+let pagesFor = null; // { date, list: [{ id, page, count }] }
+async function renderPages() {
+  const bar = $("#pageBar");
+  const date = S.date, page = S.page || 1;
+  const draw = () => {
+    if (S.date !== date) return;
+    const list = (pagesFor && pagesFor.date === date ? pagesFor.list : []).filter((p) => p.count > 0 || p.page === page || p.id === S.boardId);
+    if (!list.some((p) => p.page === page)) list.push({ page, count: 0 });
+    list.sort((a, b) => a.page - b.page);
+    const multi = list.length > 1;
+    bar.innerHTML = (multi ? list.map((p, i) => `<button class="pg ${p.page === page ? "on" : ""}" data-page="${p.page}" aria-label="board ${i + 1}">${i + 1}</button>`).join("") : "")
+      + `<button class="pg add" id="pgAdd" aria-label="new board for this day">＋${multi ? "" : " another board"}</button>`;
+    bar.querySelectorAll("[data-page]").forEach((b) => (b.onclick = () => {
+      const p = +b.dataset.page;
+      if (p === S.page) return pageMenu(list);
+      openDay(S.date, p);
+    }));
+    $("#pgAdd").onclick = () => {
+      const max = Math.max(...list.map((p) => p.page));
+      if (!S.day.items.length && list.length > 1 && page === max) return toast("pin something here first");
+      if (max >= 20) return toast("20 boards is the most for one day");
+      openDay(S.date, max + 1);
+    };
+  };
+  draw();
+  try {
+    const list = await db.dayPages(date);
+    pagesFor = { date, list };
+    draw();
+  } catch {}
+}
+function pageMenu(list) {
+  const items = [{ label: "new board for this day", run: () => $("#pgAdd").click() }];
+  if (list.length > 1) items.push({ label: "delete this board", danger: true, run: () => community.actions("delete this board?", [
+    { label: "yes, delete it and everything on it", danger: true, run: deleteThisPage },
+    { label: "keep it", run: () => {} },
+  ]) });
+  community.actions(`board ${list.findIndex((p) => p.page === S.page) + 1} of ${list.length}`, items);
+}
+async function deleteThisPage() {
+  const date = S.date, id = S.boardId;
+  dirty = false; clearTimeout(saveTimer);
+  try {
+    if (id) await db.deleteBoard(id);
+    const rest = (pagesFor?.list || []).filter((p) => p.id !== id && p.count > 0);
+    toast("board deleted");
+    openDay(date, rest.length ? rest[0].page : 1);
+  } catch (e) { toast("couldn't delete: " + e.message); }
+}
 $("#prevDay").onclick = () => openDay(addDays(S.date, -1));
 $("#nextDay").onclick = () => openDay(addDays(S.date, 1));
 $("#dateBtn").onclick = () => openDays();
@@ -443,7 +499,7 @@ async function openDays() {
       const dt = parseYmd(d.date);
       return `<button class="day-row ${d.date === S.date ? "cur" : ""}" data-date="${d.date}">
         <span class="day-thumb">${d.preview ? `<img data-photo="${esc(d.preview)}" src="${BLANK}" alt="" loading="lazy">` : ""}</span>
-        <span><b>${DOW_LONG[dt.getDay()]} ${dt.getDate()} ${MON[dt.getMonth()]}</b><small>${dt.getFullYear()} · ${d.count} ${d.count === 1 ? "thing" : "things"} pinned</small></span>
+        <span><b>${DOW_LONG[dt.getDay()]} ${dt.getDate()} ${MON[dt.getMonth()]}</b><small>${dt.getFullYear()} · ${d.count} ${d.count === 1 ? "thing" : "things"} pinned${d.pages > 1 ? ` · ${d.pages} boards` : ""}</small></span>
       </button>`;
     }).join("");
     list.querySelectorAll(".day-row").forEach((b) => (b.onclick = () => { closeSheets(); openDay(b.dataset.date); }));
@@ -470,6 +526,7 @@ async function flush() {
   const key = ctxKey();
   const isDay = S.ctx.kind === "day";
   const date = S.date;
+  const page = S.page || 1;
   const uid = S.user.id;
   const items = S.day.items;
   const saved = S.saved;
@@ -479,8 +536,8 @@ async function flush() {
   const bg = S.day.board;
   try {
     if (isDay && !S.boardId && (changedItems.length || bg !== "silver")) {
-      S.boardId = await db.ensureDayBoard(uid, date, bg);
-      if (ctxKey() === "d:" + date) startWatch(S.boardId);
+      S.boardId = await db.ensureDayBoard(uid, date, bg, page);
+      if (ctxKey() === dayKey(date, page)) { startWatch(S.boardId); renderPages(); }
     }
     const boardId = S.boardId;
     if (boardId && S.isOwner && bg !== S.savedBoard) await db.setBackground(boardId, bg);
@@ -491,7 +548,7 @@ async function flush() {
       await db.saveItems(boardId, uid, changedItems);
       await db.deleteItems(removed);
     }
-    if (ctxKey() === key || (isDay && ctxKey() === "d:" + date)) S.savedBoard = bg;
+    if (ctxKey() === key || (isDay && ctxKey() === dayKey(date, page))) S.savedBoard = bg;
     if (!dirty) setStatus("saved");
   } catch (e) {
     // put them back as unsaved so the retry sends them again
@@ -799,11 +856,11 @@ function removeItem(it) {
   S.day.items = S.day.items.filter((i) => i !== it);
   S.els.get(it.id)?.remove();
   S.els.delete(it.id);
-  lastDeleted = { item: it, date: S.date };
+  lastDeleted = { item: it, key: ctxKey() };
   select(null);
   changed();
   toast("removed", "undo", () => {
-    if (!lastDeleted || lastDeleted.date !== S.date) return;
+    if (!lastDeleted || lastDeleted.key !== ctxKey()) return;
     S.day.items.push(lastDeleted.item);
     mount(lastDeleted.item);
     lastDeleted = null;

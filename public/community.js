@@ -97,7 +97,7 @@ function afterRender(root) {
 const postDate = (p) => p.board_day || p.created_at.slice(0, 10);
 
 // action sheet built on the fly (report, delete…)
-function actions(title, list) {
+export function actions(title, list) {
   let el = $("#actionSheet");
   if (!el) {
     el = document.createElement("div");
@@ -979,7 +979,7 @@ function recapStats(boards) {
       else stickers++;
     }
   }
-  return { days: boards.length, photos, notes, stickers, magnets, texts };
+  return { days: new Set(boards.map((b) => b.day)).size, photos, notes, stickers, magnets, texts };
 }
 function fallbackLine(st, monthName) {
   if (!st.days) return `${monthName} is waiting for its first magnet.`;
@@ -1011,7 +1011,8 @@ export async function recapPage(key = lastMonthKey()) {
   $("#rcStats").innerHTML = [["days pinned", st.days], ["photos", st.photos], ["notes", st.notes], ["stickers", st.stickers], ["magnets", st.magnets]]
     .map(([k, v]) => `<span><b>${v}</b>${k}</span>`).join("");
   // calendar
-  const byDay = new Map(boards.map((b) => [Number(b.day.slice(8, 10)), b]));
+  const byDay = new Map();
+  for (const b of boards) if (!byDay.has(Number(b.day.slice(8, 10)))) byDay.set(Number(b.day.slice(8, 10)), b);
   const lead = (first.getDay() + 6) % 7; // weeks start monday
   const daysIn = new Date(y, m, 0).getDate();
   let cells = ["m", "t", "w", "t", "f", "s", "s"].map((d) => `<span class="cal-h">${d}</span>`).join("");
