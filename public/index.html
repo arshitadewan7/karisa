@@ -151,10 +151,11 @@
   </footer>
 
   <nav class="tabbar" id="tabbar">
-    <a href="#today" data-tab="diary"><b>▦</b>diary</a>
-    <a href="#feed" data-tab="feed"><b>✦</b>feed</a>
-    <a href="#together" data-tab="together"><b>❀</b>together</a>
-    <a href="#me" data-tab="me"><b>☺</b>me</a>
+    <a href="#feed" data-tab="home" aria-label="home"><span class="tab-ic"><svg viewBox="0 0 24 24" class="ic"><path d="M3.5 10.5 12 3.5l8.5 7V20a1 1 0 0 1-1 1h-5v-6h-5v6h-5a1 1 0 0 1-1-1Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></span><small>home</small></a>
+    <a href="#explore" data-tab="search" aria-label="explore"><span class="tab-ic"><svg viewBox="0 0 24 24" class="ic"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m15.5 15.5 5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span><small>explore</small></a>
+    <a href="#today" data-tab="diary" class="tab-diary" aria-label="my diary"><span class="tab-ic"><span class="diary-btn"></span></span><small>diary</small></a>
+    <a href="#together" data-tab="together" aria-label="together"><span class="tab-ic"><svg viewBox="0 0 24 24" class="ic"><circle cx="9" cy="8.5" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 19.5a6 6 0 0 1 12 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="16.5" cy="9.5" r="2.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M16 14.2a5 5 0 0 1 5.5 5.3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span><small>together</small></a>
+    <a href="#me" data-tab="me" aria-label="profile"><span class="tab-ic"><svg viewBox="0 0 24 24" class="ic"><circle cx="12" cy="8.5" r="3.8" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4.5 20.5a7.5 7.5 0 0 1 15 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span><small>me</small></a>
   </nav>
 
   <input type="file" id="fileIn" accept="image/*" multiple hidden>
@@ -192,17 +193,26 @@
 </div>
 
 <div class="sheet" id="postSheet" hidden>
-  <div class="sheet-head"><h3 id="postTitle">post this board</h3><button class="x" data-close>✕</button></div>
-  <p class="sheet-note" id="postNote">the board stays live: anything you add later shows up on your post too.</p>
-  <textarea id="postCaption" class="field" rows="3" maxlength="500" placeholder="write a caption…"></textarea>
+  <div class="sheet-head"><h3 id="postTitle">new post</h3><button class="x" data-close>✕</button></div>
+  <div class="post-compose">
+    <div class="post-preview" id="postPreview"></div>
+    <textarea id="postCaption" class="field" rows="4" maxlength="500" placeholder="write a caption… use @username to mention friends"></textarea>
+  </div>
+  <div class="tag-box">
+    <label class="tag-label">tag people</label>
+    <div class="tag-chips" id="tagChips"></div>
+    <input id="tagIn" class="field" placeholder="search @username to tag" autocomplete="off" autocapitalize="off">
+    <div class="find-out" id="tagOut"></div>
+  </div>
+  <p class="sheet-note small">tagged friends get a notification and can always see this post.</p>
   <div class="seg" id="postVis">
     <button data-vis="followers" class="on"><b>followers</b><small>people who follow you</small></button>
-    <button data-vis="public"><b>everyone</b><small>shows in explore</small></button>
+    <button data-vis="public"><b>everyone</b><small>also shows in explore</small></button>
   </div>
   <div class="edit-row">
     <button class="chip danger-chip" id="unpostBtn" hidden>take it down</button>
     <span class="spacer"></span>
-    <button class="btn-primary small" id="postGo">post</button>
+    <button class="btn-primary small" id="postGo">share</button>
   </div>
 </div>
 

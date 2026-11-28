@@ -161,15 +161,31 @@ export async function unfollow(me, them) {
 }
 
 // ---------- posts ----------
-export async function feed({ kind = "explore", author = null, post = null, before = null, limit = 20 } = {}) {
-  const { data, error } = await sb.rpc("posts_feed", { p_kind: kind, p_author: author, p_post: post, p_before: before, p_limit: limit });
+export async function feed({ kind = "explore", author = null, post = null, before = null, limit = 20, tagged = null } = {}) {
+  const { data, error } = await sb.rpc("posts_feed", { p_kind: kind, p_author: author, p_post: post, p_before: before, p_limit: limit, p_tagged: tagged });
   fail(error);
   return data.map((p) => ({
     ...p,
     magnets: Number(p.magnets),
     comment_count: Number(p.comment_count),
     items: (p.items || []).map((r) => ({ ...r.data, id: r.id, type: r.type, z: r.z })),
+    tags: p.tags || [],
+    preview_comments: p.preview_comments || [],
   }));
+}
+// tags: make the post's tagged people exactly `userIds`
+export async function setTags(uid, postId, userIds) {
+  const { data: cur, error } = await sb.from("post_tags").select("user_id").eq("post_id", postId);
+  fail(error);
+  const have = new Set(cur.map((r) => r.user_id)), want = new Set(userIds);
+  const add = [...want].filter((x) => !have.has(x)).map((user_id) => ({ post_id: postId, user_id, tagged_by: uid }));
+  const del = [...have].filter((x) => !want.has(x));
+  if (add.length) { const { error: e } = await sb.from("post_tags").insert(add); fail(e); }
+  if (del.length) { const { error: e } = await sb.from("post_tags").delete().eq("post_id", postId).in("user_id", del); fail(e); }
+}
+export async function untagMe(uid, postId) {
+  const { error } = await sb.from("post_tags").delete().eq("post_id", postId).eq("user_id", uid);
+  fail(error);
 }
 export async function boardInfo(boardId) {
   const { data, error } = await sb.rpc("board_info", { p_board: boardId });

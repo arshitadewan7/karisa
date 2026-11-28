@@ -19,10 +19,13 @@ Live at **https://karisa.space**
 
 - **Profiles:** username, name, bio and photo. Asked for the first time someone opens the feed, together, me, or posts.
 - **Posting:** on any board you own, tap **↗ post**, write a caption and choose **followers** or **everyone**. The post shows the live board, so anything added later appears on it. "take it down" makes the board private again.
-- **Feed:** *following* (people you follow, plus your own posts) and *explore* (everything posted for everyone). Find friends by name or @username.
+- **Home:** posts from people you follow plus your own, with a stories row of friends who posted. Double-tap a board to give it a magnet. Share copies a link to the post.
+- **Explore:** search people, and a grid of every board posted for everyone.
+- **Tagging:** when posting, tag friends by @username. They get a notification, can always see the post (even followers-only), and it shows on the *tagged* tab of their profile. Anyone can remove themselves from a post. `@username` in captions and comments links to their profile.
+- **Activity:** new followers, magnets, comments, tags and board invites, grouped by today / this week / earlier (heart icon on the home screen).
 - **Magnets and comments:** a magnet is a like. Comments can be deleted by whoever wrote them or by the post's owner.
 - **Together:** shared memory boards. Create one, tap **people** and invite friends by @username. Everyone on the board can add and move things, and changes show up on everyone's screen live. Green rings show who has it open.
-- **Me:** your profile, your posts, and activity (new followers, magnets, comments, board invites).
+- **Me:** profile with posts and tagged grids, edit profile, share profile.
 - **Safety:** diaries are private unless posted. Posts, comments and profiles can be reported; reports land in the `reports` table (Supabase → Table Editor) for you to review.
 
 ```
@@ -58,6 +61,7 @@ Open http://localhost:3000. It talks to the live Supabase project, so use a test
 | `posts` | a board shared to the feed, with caption |
 | `reactions` | magnets (likes) on posts |
 | `comments` | comments on posts |
+| `post_tags` | people tagged in posts |
 | `reports` | reports filed by people, for you to review |
 
 ## Supabase settings to check

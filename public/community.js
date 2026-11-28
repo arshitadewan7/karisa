@@ -1,4 +1,4 @@
-// community: feed, profiles, posting, comments, shared "together" boards.
+// community: feed, explore, activity, profiles, posting + tagging, comments, together boards.
 // app.js hands over what it owns (state, renderers, sheets) through init().
 let D; // deps from app.js
 const $ = (s, r = document) => r.querySelector(s);
@@ -9,14 +9,31 @@ export function init(deps) {
   window.addEventListener("resize", () => scaleMinis(document));
 }
 
+// ---------------- icons ----------------
+const svg = (d, extra = "") => `<svg viewBox="0 0 24 24" class="ic" aria-hidden="true" ${extra}>${d}</svg>`;
+export const ICON = {
+  magnet: svg(`<path d="M5 3h4v8.5a3 3 0 0 0 6 0V3h4v8.5a7 7 0 0 1-14 0Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M5 7h4M15 7h4" stroke="currentColor" stroke-width="1.7"/>`),
+  magnetOn: svg(`<path d="M5 3h4v8.5a3 3 0 0 0 6 0V3h4v8.5a7 7 0 0 1-14 0Z" fill="currentColor" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M5 7h4M15 7h4" stroke="#fff" stroke-width="1.7"/>`),
+  comment: svg(`<path d="M20.5 11.5a8.5 8.5 0 0 1-12.6 7.4L3.5 20.5l1.6-4.2A8.5 8.5 0 1 1 20.5 11.5Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>`),
+  share: svg(`<path d="M21 3 10 14M21 3l-7 18-4-7-7-4Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>`),
+  heart: svg(`<path d="M12 20.5s-8-4.6-8-10.6A4.4 4.4 0 0 1 12 7.4a4.4 4.4 0 0 1 8 2.5c0 6-8 10.6-8 10.6Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>`),
+  tag: svg(`<circle cx="12" cy="8" r="3.6" fill="currentColor"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0Z" fill="currentColor"/>`),
+  grid: svg(`<path d="M3 3h18v18H3ZM9 3v18M15 3v18M3 9h18M3 15h18" fill="none" stroke="currentColor" stroke-width="1.6"/>`),
+  tagged: svg(`<rect x="3" y="3" width="18" height="18" rx="3" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="10" r="3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M6.5 19a5.5 5.5 0 0 1 11 0" fill="none" stroke="currentColor" stroke-width="1.6"/>`),
+  back: svg(`<path d="M15 4 7 12l8 8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`),
+  search: svg(`<circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m15.5 15.5 5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>`),
+  plus: svg(`<path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`),
+};
+
 // ---------------- small helpers ----------------
 const esc = (s) => D.esc(s);
-function ago(ts) {
+function ago(ts, long = false) {
   const s = Math.max(1, (Date.now() - new Date(ts).getTime()) / 1000);
-  if (s < 60) return "now";
-  if (s < 3600) return Math.floor(s / 60) + "m";
-  if (s < 86400) return Math.floor(s / 3600) + "h";
-  if (s < 86400 * 7) return Math.floor(s / 86400) + "d";
+  const unit = (n, w) => long ? `${n} ${w}${n === 1 ? "" : "s"} ago` : `${n}${w[0]}`;
+  if (s < 60) return long ? "just now" : "now";
+  if (s < 3600) return unit(Math.floor(s / 60), "minute");
+  if (s < 86400) return unit(Math.floor(s / 3600), "hour");
+  if (s < 86400 * 7) return unit(Math.floor(s / 86400), "day");
   const d = new Date(ts);
   return `${d.getDate()} ${D.MON[d.getMonth()]}`;
 }
@@ -27,6 +44,10 @@ export function avatar(p, cls = "") {
   if (url) return `<img class="avatar ${cls}" src="${esc(url)}" alt="">`;
   const n = nameOf(p);
   return `<span class="avatar ${cls}" style="background:hsl(${hue(p.username || n)} 45% 62%)">${esc(n.slice(0, 1).toUpperCase())}</span>`;
+}
+// turn @username into profile links (text is escaped first)
+function linkify(text) {
+  return esc(text).replace(/(^|[\s(])@([a-z0-9_.]{3,24})/gi, (m, pre, u) => `${pre}<a class="mention" href="#@${u.toLowerCase()}">@${u}</a>`);
 }
 function boardLabel(p) {
   if (p.board_kind === "shared") return p.board_title || "memory board";
@@ -43,6 +64,14 @@ function page(html, tab) {
   return el;
 }
 const loading = (t = "loading…") => `<p class="muted center pad">${t}</p>`;
+async function shareLink(path, title) {
+  const url = `${location.origin}/${path}`;
+  try {
+    if (navigator.share) { await navigator.share({ title, url }); return; }
+  } catch (e) { if (e.name === "AbortError") return; }
+  try { await navigator.clipboard.writeText(url); D.toast("link copied"); }
+  catch { D.toast(url, null, null, 6000); }
+}
 
 // read-only board, scaled to whatever width its box has
 export function miniBoard(items, bg, date) {
@@ -63,6 +92,7 @@ function afterRender(root) {
   scaleMinis(root);
   D.hydratePhotos(root);
 }
+const postDate = (p) => p.board_day || p.created_at.slice(0, 10);
 
 // action sheet built on the fly (report, delete…)
 function actions(title, list) {
@@ -85,7 +115,7 @@ function reportMenu(target, what) {
     label: reason,
     run: async () => {
       try { await D.db.report(D.S.user.id, target, reason); D.toast("thanks for telling us. we'll take a look."); }
-      catch (e) { D.toast("couldn't send that report"); }
+      catch { D.toast("couldn't send that report"); }
     },
   })));
 }
@@ -93,7 +123,7 @@ function reportMenu(target, what) {
 // ---------------- username gate ----------------
 async function ensureUsername(then) {
   if (D.S.me?.username) return true;
-  page(`<section class="empty-page"><h2>make your profile</h2><p>pick a username so friends can find you, follow you and invite you to boards.</p><button class="btn-primary small" id="setupGo">set up profile</button></section>`, "me");
+  page(`<section class="empty-page"><h2>make your profile</h2><p>pick a username so friends can find you, follow you, tag you and invite you to boards.</p><button class="btn-primary small" id="setupGo">set up profile</button></section>`, "me");
   $("#setupGo").onclick = () => openProfileSheet(true, then);
   openProfileSheet(true, then);
   return false;
@@ -118,6 +148,37 @@ function suggestUsername() {
   const base = (D.S.user.email || "").split("@")[0].toLowerCase().replace(/[^a-z0-9_.]/g, "").slice(0, 18);
   return base.length >= 3 ? base : "";
 }
+
+// ---------------- tag picker (inside the post sheet) ----------------
+let tagPicks = []; // [{id, username, display_name, avatar_path}]
+function renderTagChips() {
+  $("#tagChips").innerHTML = tagPicks.map((p, i) => `<span class="tchip">${avatar(p, "xs")}@${esc(p.username)}<button data-untag="${i}" aria-label="remove">✕</button></span>`).join("");
+  $("#tagChips").querySelectorAll("[data-untag]").forEach((b) => (b.onclick = () => { tagPicks.splice(+b.dataset.untag, 1); renderTagChips(); }));
+}
+function wireTagSearch() {
+  const input = $("#tagIn"), out = $("#tagOut");
+  let t;
+  input.oninput = () => {
+    clearTimeout(t);
+    const q = input.value.trim().replace(/^@/, "");
+    if (!q) { out.innerHTML = ""; return; }
+    t = setTimeout(async () => {
+      try {
+        const people = (await D.db.searchPeople(q)).filter((p) => p.id !== D.S.user.id && !tagPicks.some((x) => x.id === p.id));
+        out.innerHTML = people.slice(0, 6).map((p, i) => `<button class="person" data-pick="${i}">${avatar(p, "s")}<span><b>${esc(nameOf(p))}</b><small>@${esc(p.username)}</small></span></button>`).join("")
+          || `<p class="muted pad-s">no one found</p>`;
+        out.querySelectorAll("[data-pick]").forEach((b) => (b.onclick = () => {
+          if (tagPicks.length >= 20) return D.toast("that's a lot of tags! 20 max");
+          tagPicks.push(people[+b.dataset.pick]);
+          input.value = ""; out.innerHTML = "";
+          renderTagChips();
+          input.focus();
+        }));
+      } catch { out.innerHTML = ""; }
+    }, 200);
+  };
+}
+
 function wireSheets() {
   $("#avatarPick").onclick = () => $("#avatarIn").click();
   $("#avatarIn").onchange = async (e) => {
@@ -142,6 +203,7 @@ function wireSheets() {
       D.S.me = await D.db.myProfile(D.S.user.id);
       if (display_name) D.S.user.name = display_name;
       D.renderTitle();
+      renderMeTab();
       D.closeSheets();
       D.toast("profile saved");
       const then = pfThen;
@@ -153,6 +215,7 @@ function wireSheets() {
   };
 
   // posting
+  wireTagSearch();
   $("#postVis").onclick = (e) => {
     const b = e.target.closest("[data-vis]");
     if (!b) return;
@@ -164,11 +227,13 @@ function wireSheets() {
     $("#postGo").disabled = true;
     try {
       const id = await D.db.publishBoard(D.S.user.id, D.S.boardId, caption, vis);
+      await D.db.setTags(D.S.user.id, id, tagPicks.map((p) => p.id));
       D.S.post = { id, caption };
       D.S.visibility = vis;
       D.renderPostBtn();
       D.closeSheets();
-      D.toast(vis === "public" ? "posted for everyone" : "posted for your followers", "view", () => (location.hash = "#p/" + id));
+      const n = tagPicks.length;
+      D.toast(`posted${n ? ` and tagged ${n} ${n === 1 ? "friend" : "friends"}` : vis === "public" ? " for everyone" : " for your followers"}`, "view", () => (location.hash = "#p/" + id));
     } catch (e) { D.toast("couldn't post: " + e.message); }
     finally { $("#postGo").disabled = false; }
   };
@@ -182,12 +247,18 @@ function wireSheets() {
       D.renderPostBtn();
       D.closeSheets();
       D.toast("taken down. the board is private again.");
-    } catch (e) { D.toast("couldn't take it down"); }
+    } catch { D.toast("couldn't take it down"); }
   };
 
   // people on a shared board
   $("#inviteGo").onclick = doInvite;
   $("#inviteIn").addEventListener("keydown", (e) => { if (e.key === "Enter") doInvite(); });
+}
+
+// me tab shows my avatar once I have a profile
+export function renderMeTab() {
+  const el = $("#tabbar [data-tab=me] .tab-ic");
+  if (el && D.S.me) el.innerHTML = avatar(D.S.me, "tab");
 }
 
 // ---------------- posting a board ----------------
@@ -196,69 +267,115 @@ export async function openPostSheet() {
   if (!D.S.boardId || !D.S.day.items.length) { D.toast("pin something first, then post it"); return; }
   if (!(await ensureUsername(() => { D.route(); }))) return;
   const posted = !!D.S.post;
-  $("#postTitle").textContent = posted ? "your post" : "post this board";
+  $("#postTitle").textContent = posted ? "edit post" : "new post";
   $("#postCaption").value = D.S.post?.caption || "";
   const vis = D.S.visibility === "public" ? "public" : "followers";
   $("#postVis").querySelectorAll("button").forEach((x) => x.classList.toggle("on", x.dataset.vis === vis));
-  $("#postGo").textContent = posted ? "update" : "post";
+  $("#postGo").textContent = posted ? "save" : "share";
   const u = $("#unpostBtn");
   u.hidden = !posted;
   u.classList.remove("armed");
   u.textContent = "take it down";
+  $("#tagIn").value = "";
+  $("#tagOut").innerHTML = "";
+  tagPicks = [];
+  renderTagChips();
+  $("#postPreview").innerHTML = miniBoard(D.S.day.items, D.S.day.board, D.S.date || new Date().toISOString().slice(0, 10));
   D.openSheet("#postSheet");
+  afterRender($("#postPreview"));
+  if (posted) {
+    try {
+      const [p] = await D.db.feed({ kind: "any", post: D.S.post.id, limit: 1 });
+      if (p) { tagPicks = p.tags.slice(); renderTagChips(); if (!$("#postCaption").value) $("#postCaption").value = p.caption || ""; }
+    } catch {}
+  }
 }
 
-// ---------------- feed ----------------
-let feedKind = "following";
-export async function feedPage(kind = feedKind) {
-  feedKind = kind;
-  if (!(await ensureUsername(() => feedPage(kind)))) return;
+// ---------------- feed (home) ----------------
+export async function feedPage() {
+  if (!(await ensureUsername(() => feedPage()))) return;
+  renderMeTab();
   const el = page(`
-    <header class="page-head">
-      <h2>feed</h2>
-      <div class="seg small" id="feedSeg">
-        <a href="#feed" class="${kind === "following" ? "on" : ""}">following</a>
-        <a href="#explore" class="${kind === "explore" ? "on" : ""}">explore</a>
-      </div>
+    <header class="app-head">
+      <h1 class="wordmark">magnet <em>diary</em></h1>
+      <a class="icon-btn" href="#activity" aria-label="activity">${ICON.heart}</a>
     </header>
-    <div class="find"><input id="findIn" class="field" placeholder="find friends by name or @username" autocomplete="off" autocapitalize="off"><div id="findOut" class="find-out"></div></div>
+    <div class="stories" id="stories"></div>
     <div class="cards" id="cards">${loading()}</div>
-    <div class="center pad"><button class="chip" id="moreBtn" hidden>load more</button></div>`, "feed");
-  wireFind();
-  let before = null;
+    <div class="center pad"><button class="chip" id="moreBtn" hidden>load more</button></div>`, "home");
+  let before = null, all = [];
   const load = async () => {
-    const posts = await D.db.feed({ kind, before });
+    const posts = await D.db.feed({ kind: "following", before });
+    all = all.concat(posts);
     const cards = $("#cards", el);
     if (!before) cards.innerHTML = "";
-    if (!posts.length && !before) {
-      cards.innerHTML = kind === "following"
-        ? `<section class="empty-page small"><p>nothing here yet. follow friends to see their boards, or post one of yours.</p><a class="chip" href="#explore">see explore</a></section>`
-        : `<section class="empty-page small"><p>no public boards yet. be the first: open a day and tap ↗ post.</p></section>`;
-    }
-    cards.insertAdjacentHTML("beforeend", posts.map(cardHtml).join(""));
+    if (!posts.length && !before) cards.innerHTML = await emptyFeed();
+    cards.insertAdjacentHTML("beforeend", posts.map((p) => cardHtml(p)).join(""));
     wireCards(cards, posts);
     afterRender(cards);
+    if (!before) renderStories(all);
     before = posts.length ? posts[posts.length - 1].created_at : before;
     $("#moreBtn", el).hidden = posts.length < 20;
   };
   $("#moreBtn", el).onclick = load;
-  try { await load(); } catch (e) { $("#cards", el).innerHTML = `<p class="muted center pad">couldn't load the feed.</p>`; }
+  try { await load(); } catch { $("#cards", el).innerHTML = `<p class="muted center pad">couldn't load the feed.</p>`; }
+}
+function renderStories(posts) {
+  const seen = new Set(), list = [];
+  for (const p of posts) if (p.author_id !== D.S.user.id && !seen.has(p.author_id)) { seen.add(p.author_id); list.push(p); }
+  const me = D.S.me || {};
+  $("#stories").innerHTML = `
+    <a class="story me" href="#today"><span class="ring plain">${avatar(me, "story")}<i class="story-plus">${ICON.plus}</i></span><small>your board</small></a>
+    ${list.slice(0, 20).map((p) => `<a class="story" href="#p/${p.post_id}"><span class="ring">${avatar(p, "story")}</span><small>${esc(p.username || "")}</small></a>`).join("")}`;
+}
+async function emptyFeed() {
+  let suggest = [];
+  try {
+    const ex = await D.db.feed({ kind: "explore", limit: 30 });
+    const seen = new Set();
+    for (const p of ex) if (p.author_id !== D.S.user.id && !seen.has(p.author_id)) { seen.add(p.author_id); suggest.push(p); }
+  } catch {}
+  return `<section class="empty-page small"><h2>welcome in</h2><p>follow friends to see their boards here. your own posts show up here too.</p>
+    ${suggest.length ? `<div class="suggest">${suggest.slice(0, 8).map((p) => `<a class="person" href="#@${esc(p.username)}">${avatar(p)}<span><b>${esc(nameOf(p))}</b><small>@${esc(p.username)}</small></span><span class="chip">view</span></a>`).join("")}</div>` : ""}
+    <a class="chip" href="#explore">explore boards</a></section>`;
 }
 
-function cardHtml(p) {
+function magnetLine(p) {
+  if (!p.magnets) return "";
+  if (p.magnet_by) {
+    const others = p.magnets - 1 - (p.i_reacted ? 1 : 0);
+    const you = p.i_reacted ? "you, " : "";
+    return `magnets from ${you}<a href="#@${esc(p.magnet_by)}"><b>${esc(p.magnet_by)}</b></a>${others > 0 ? ` and <b>${others} ${others === 1 ? "other" : "others"}</b>` : ""}`;
+  }
+  return `<b>${p.magnets} ${p.magnets === 1 ? "magnet" : "magnets"}</b>`;
+}
+function cardHtml(p, full = false) {
   const label = boardLabel(p);
+  const tags = p.tags || [];
+  const withLine = tags.length ? ` · with ${tags.slice(0, 2).map((t) => esc(t.username)).join(", ")}${tags.length > 2 ? ` +${tags.length - 2}` : ""}` : "";
+  const previews = full ? [] : (p.preview_comments || []);
   return `<article class="card" data-post="${p.post_id}">
     <header class="card-head">
-      <a class="who" href="#@${esc(p.username || "")}">${avatar(p)}<span><b>${esc(nameOf(p))}</b><small>@${esc(p.username || "")} · ${ago(p.created_at)}${p.visibility === "followers" ? " · followers" : ""}</small></span></a>
+      <a class="who" href="#@${esc(p.username || "")}"><span class="ring sm">${avatar(p)}</span><span><b>${esc(p.username || nameOf(p))}</b><small>${esc(label)}${withLine}</small></span></a>
       <button class="dots" data-menu aria-label="more">•••</button>
     </header>
-    <a class="card-board" href="#p/${p.post_id}">${miniBoard(p.items, p.background, p.board_day || p.created_at.slice(0, 10))}</a>
-    <div class="card-actions">
-      <button class="magnet-btn ${p.i_reacted ? "on" : ""}" data-magnet aria-label="give a magnet"><i class="mg"></i><span>${p.magnets}</span></button>
-      <a class="cm" href="#p/${p.post_id}">✎ <span>${p.comment_count}</span></a>
-      <span class="card-label">${esc(label)}</span>
+    <div class="card-board" data-board>
+      ${miniBoard(p.items, p.background, postDate(p))}
+      <span class="burst" aria-hidden="true">${ICON.magnetOn}</span>
+      ${tags.length ? `<button class="tag-dot" data-tags aria-label="tagged people">${ICON.tag}</button>
+        <div class="tag-pop" hidden>${tags.map((t) => `<a href="#@${esc(t.username)}">${esc(t.username)}</a>`).join("")}</div>` : ""}
     </div>
-    ${p.caption ? `<p class="card-cap"><a href="#@${esc(p.username || "")}">${esc(p.username || "")}</a> ${esc(p.caption)}</p>` : ""}
+    <div class="card-actions">
+      <button class="act ${p.i_reacted ? "on" : ""}" data-magnet aria-label="give a magnet">${p.i_reacted ? ICON.magnetOn : ICON.magnet}</button>
+      <a class="act" href="#p/${p.post_id}" aria-label="comments">${ICON.comment}</a>
+      <button class="act" data-share aria-label="share">${ICON.share}</button>
+      ${p.visibility === "followers" ? `<span class="vis-pill">followers</span>` : ""}
+    </div>
+    <p class="mline" data-mline>${magnetLine(p)}</p>
+    ${p.caption ? `<p class="card-cap"><a href="#@${esc(p.username || "")}"><b>${esc(p.username || "")}</b></a> ${linkify(p.caption)}</p>` : ""}
+    ${!full && p.comment_count > 2 ? `<a class="view-all" href="#p/${p.post_id}">view all ${p.comment_count} comments</a>` : ""}
+    ${previews.map((c) => `<p class="card-cap c"><a href="#@${esc(c.username || "")}"><b>${esc(c.username || "")}</b></a> ${linkify(c.body)}</p>`).join("")}
+    <time class="when">${ago(p.created_at, true)}</time>
   </article>`;
 }
 function wireCards(root, posts) {
@@ -268,77 +385,147 @@ function wireCards(root, posts) {
     card.dataset.wired = "1";
     const p = byId.get(card.dataset.post);
     if (!p) return;
-    card.querySelector("[data-magnet]").onclick = (e) => toggleMagnet(p, e.currentTarget);
+    const btn = card.querySelector("[data-magnet]");
+    btn.onclick = () => toggleMagnet(p, card);
     card.querySelector("[data-menu]").onclick = () => postMenu(p);
+    card.querySelector("[data-share]").onclick = () => shareLink(`#p/${p.post_id}`, `${p.username}'s magnet board`);
+    // double-tap the board for a magnet, single tap opens the post
+    const board = card.querySelector("[data-board]");
+    let tapT = 0, tapTimer = null;
+    board.addEventListener("click", (e) => {
+      if (e.target.closest("[data-tags], .tag-pop a")) return;
+      const now = Date.now();
+      if (now - tapT < 300) {
+        clearTimeout(tapTimer);
+        tapT = 0;
+        burst(card);
+        if (!p.i_reacted) toggleMagnet(p, card);
+        return;
+      }
+      tapT = now;
+      tapTimer = setTimeout(() => { if (!card.closest(".single")) location.hash = "#p/" + p.post_id; }, 300);
+    });
+    const td = card.querySelector("[data-tags]");
+    if (td) td.onclick = (e) => { e.stopPropagation(); const pop = card.querySelector(".tag-pop"); pop.hidden = !pop.hidden; };
   });
 }
-async function toggleMagnet(p, btn) {
+function burst(card) {
+  const b = card.querySelector(".burst");
+  b.classList.remove("go"); void b.offsetWidth; b.classList.add("go");
+}
+async function toggleMagnet(p, card) {
+  const btn = card.querySelector("[data-magnet]");
   const was = p.i_reacted;
+  const paint = () => {
+    btn.classList.toggle("on", p.i_reacted);
+    btn.innerHTML = p.i_reacted ? ICON.magnetOn : ICON.magnet;
+    card.querySelector("[data-mline]").innerHTML = magnetLine(p);
+  };
   p.i_reacted = !was;
   p.magnets += was ? -1 : 1;
-  btn.classList.toggle("on", p.i_reacted);
-  btn.querySelector("span").textContent = p.magnets;
-  if (!was) btn.classList.add("pop"), setTimeout(() => btn.classList.remove("pop"), 400);
+  paint();
+  if (!was) { btn.classList.add("pop"); setTimeout(() => btn.classList.remove("pop"), 400); }
   try { was ? await D.db.unreact(D.S.user.id, p.post_id) : await D.db.react(D.S.user.id, p.post_id); }
-  catch { p.i_reacted = was; p.magnets += was ? 1 : -1; btn.classList.toggle("on", was); btn.querySelector("span").textContent = p.magnets; }
+  catch { p.i_reacted = was; p.magnets += was ? 1 : -1; paint(); }
 }
 function postMenu(p) {
   const mine = p.author_id === D.S.user.id;
+  const taggedMe = (p.tags || []).some((t) => t.id === D.S.user.id);
   const list = [];
   if (mine) {
-    list.push({ label: "open my board", run: () => (location.hash = p.board_kind === "day" ? "#" + p.board_day : "#b/" + p.board_id) });
+    list.push({ label: "edit post or tags", run: () => (location.hash = p.board_kind === "day" ? "#" + p.board_day : "#b/" + p.board_id) });
     list.push({ label: "take this post down", danger: true, run: async () => {
       try { await D.db.unpublishBoard(p.board_id); D.toast("taken down"); D.route(); } catch { D.toast("couldn't take it down"); }
     } });
   } else {
     list.push({ label: `view @${p.username}`, run: () => (location.hash = "#@" + p.username) });
+    if (taggedMe) list.push({ label: "remove me from this post", run: async () => {
+      try { await D.db.untagMe(D.S.user.id, p.post_id); D.toast("you're untagged"); D.route(); } catch { D.toast("couldn't untag you"); }
+    } });
     list.push({ label: "report this post", danger: true, run: () => reportMenu({ post_id: p.post_id }, "post") });
   }
+  list.push({ label: "copy link", run: () => shareLink(`#p/${p.post_id}`, "magnet board") });
   actions("post", list);
 }
 
-// people search
-function wireFind() {
-  const input = $("#findIn"), out = $("#findOut");
+// ---------------- explore + search ----------------
+export async function explorePage() {
+  if (!(await ensureUsername(() => explorePage()))) return;
+  const el = page(`
+    <div class="search-bar">${ICON.search}<input id="findIn" placeholder="search people" autocomplete="off" autocapitalize="off"></div>
+    <div id="findOut" class="find-out"></div>
+    <div class="xgrid" id="xgrid">${loading()}</div>`, "search");
+  const input = $("#findIn"), out = $("#findOut"), grid = $("#xgrid");
   let t;
   input.oninput = () => {
     clearTimeout(t);
-    const q = input.value.trim();
+    const q = input.value.trim().replace(/^@/, "");
+    grid.hidden = !!q;
     if (!q) { out.innerHTML = ""; return; }
     t = setTimeout(async () => {
       try {
         const people = await D.db.searchPeople(q);
         out.innerHTML = people.length
-          ? people.map((p) => `<a class="person" href="#@${esc(p.username)}">${avatar(p)}<span><b>${esc(nameOf(p))}</b><small>@${esc(p.username)}</small></span></a>`).join("")
+          ? people.map((p) => `<a class="person" href="#@${esc(p.username)}">${avatar(p)}<span><b>${esc(p.username)}</b><small>${esc(nameOf(p))}</small></span></a>`).join("")
           : `<p class="muted pad-s">no one found</p>`;
       } catch { out.innerHTML = ""; }
-    }, 250);
+    }, 200);
   };
+  try {
+    const posts = await D.db.feed({ kind: "explore", limit: 60 });
+    grid.innerHTML = posts.length
+      ? posts.map((x, i) => `<a class="xtile ${i % 10 === 2 ? "big" : ""}" href="#p/${x.post_id}">${miniBoard(x.items, x.background, postDate(x))}${x.magnets ? `<span class="xm">${ICON.magnetOn}${x.magnets}</span>` : ""}</a>`).join("")
+      : `<section class="empty-page small"><p>no public boards yet. post one of yours for everyone and it'll show up here.</p></section>`;
+    afterRender(grid);
+  } catch { grid.innerHTML = `<p class="muted center pad">couldn't load explore.</p>`; }
+}
+
+// ---------------- activity ----------------
+export async function activityPage() {
+  if (!(await ensureUsername(() => activityPage()))) return;
+  const el = page(`<header class="app-head"><button class="icon-btn" id="pgBack" aria-label="back">${ICON.back}</button><h2 class="ph">activity</h2><span class="icon-btn"></span></header><div id="actList">${loading()}</div>`, "home");
+  $("#pgBack").onclick = () => (history.length > 1 ? history.back() : (location.hash = "#feed"));
+  try {
+    const list = await D.db.activity();
+    const words = { follow: "started following you.", magnet: "gave your board a magnet.", comment: "commented:", invite: "added you to", tag: "tagged you in a post." };
+    const groups = [["today", 86400e3], ["this week", 7 * 86400e3], ["earlier", Infinity]];
+    let html = "", gi = 0, cur = null;
+    for (const a of list) {
+      const age = Date.now() - new Date(a.at).getTime();
+      while (age > groups[gi][1]) gi++;
+      if (cur !== gi) { cur = gi; html += `<h4 class="act-h">${groups[gi][0]}</h4>`; }
+      const href = a.kind === "follow" ? `#@${a.username}` : a.kind === "invite" ? `#b/${a.board_id}` : `#p/${a.post_id}`;
+      const extra = a.kind === "comment" ? ` ${linkify(a.body || "")}` : a.kind === "invite" ? ` <b>${esc(a.body || "a memory board")}</b>.` : "";
+      html += `<a class="act-row" href="${esc(href)}">${avatar(a)}<span><b>${esc(a.username || nameOf(a))}</b> ${words[a.kind]}${extra} <small>${ago(a.at)}</small></span>
+        ${a.kind === "follow" ? `<span class="chip">view</span>` : a.kind === "invite" ? `<span class="chip">open</span>` : `<span class="act-ic">${a.kind === "magnet" ? ICON.magnetOn : a.kind === "tag" ? ICON.tag : ICON.comment}</span>`}</a>`;
+    }
+    $("#actList").innerHTML = html || `<section class="empty-page small"><p>nothing yet. when people follow you, give your boards magnets, comment, tag you or add you to a board, it shows up here.</p></section>`;
+  } catch { $("#actList").innerHTML = `<p class="muted">couldn't load activity.</p>`; }
 }
 
 // ---------------- a single post ----------------
 export async function postPage(id) {
   if (!(await ensureUsername(() => postPage(id)))) return;
-  const el = page(`<header class="page-head"><button class="icon back" id="pgBack">‹</button><h2>post</h2></header><div id="postBody">${loading()}</div>`, "feed");
+  const el = page(`<header class="app-head"><button class="icon-btn" id="pgBack" aria-label="back">${ICON.back}</button><h2 class="ph">post</h2><span class="icon-btn"></span></header><div id="postBody">${loading()}</div>`, "home");
   $("#pgBack").onclick = () => (history.length > 1 ? history.back() : (location.hash = "#feed"));
   let p;
   try { [p] = await D.db.feed({ kind: "any", post: id, limit: 1 }); } catch {}
   const body = $("#postBody", el);
   if (!p) { body.innerHTML = `<section class="empty-page small"><p>this post isn't available. it may have been taken down or be for followers only.</p></section>`; return; }
-  body.innerHTML = `<div class="cards single">${cardHtml(p)}</div>
-    <section class="comments"><h3>comments</h3><div id="cmList">${loading()}</div>
-      <form id="cmForm" class="cm-form"><input id="cmIn" class="field" maxlength="500" placeholder="say something nice…" autocomplete="off"><button class="btn-primary small">send</button></form>
+  body.innerHTML = `<div class="cards single">${cardHtml(p, true)}</div>
+    <section class="comments"><div id="cmList">${loading()}</div>
+      <form id="cmForm" class="cm-form">${avatar(D.S.me || {}, "s")}<input id="cmIn" maxlength="500" placeholder="add a comment…" autocomplete="off"><button class="post-link">post</button></form>
     </section>`;
   wireCards(body, [p]);
   afterRender(body);
   const renderComments = async () => {
     const list = await D.db.comments(id);
-    const mineOrMyPost = (c) => c.author_id === D.S.user.id || p.author_id === D.S.user.id;
+    const canDelete = (c) => c.author_id === D.S.user.id || p.author_id === D.S.user.id;
     $("#cmList").innerHTML = list.length ? list.map((c) => `<div class="cm-row" data-id="${c.id}">
         <a href="#@${esc(c.username || "")}">${avatar(c, "s")}</a>
-        <p><a href="#@${esc(c.username || "")}"><b>${esc(c.username || nameOf(c))}</b></a> ${esc(c.body)}<small>${ago(c.created_at)}</small></p>
-        <button class="dots s" data-cmenu="${c.id}" data-mine="${mineOrMyPost(c) ? 1 : 0}">•••</button>
-      </div>`).join("") : `<p class="muted pad-s">no comments yet.</p>`;
+        <p><a href="#@${esc(c.username || "")}"><b>${esc(c.username || nameOf(c))}</b></a> ${linkify(c.body)}<small>${ago(c.created_at)}</small></p>
+        <button class="dots s" data-cmenu="${c.id}" data-mine="${canDelete(c) ? 1 : 0}">•••</button>
+      </div>`).join("") : `<p class="muted pad-s">no comments yet. start the conversation.</p>`;
     $("#cmList").querySelectorAll("[data-cmenu]").forEach((b) => (b.onclick = () => {
       const cid = b.dataset.cmenu;
       const list2 = [];
@@ -360,36 +547,48 @@ export async function postPage(id) {
 // ---------------- profiles ----------------
 export async function mePage() {
   if (!(await ensureUsername(() => mePage()))) return;
-  return profilePage(D.S.me.username, true);
+  return profilePage(D.S.me.username);
 }
-export async function profilePage(username, isMeTab = false) {
+export async function profilePage(username) {
   if (!(await ensureUsername(() => profilePage(username)))) return;
+  renderMeTab();
   const own = username === D.S.me.username;
-  const el = page(`<div id="profBody">${loading()}</div>`, own ? "me" : "feed");
+  const el = page(`<div id="profBody">${loading()}</div>`, own ? "me" : "search");
   let p;
   try { p = await D.db.profileByUsername(username); } catch {}
   const body = $("#profBody", el);
   if (!p) { body.innerHTML = `<section class="empty-page small"><p>no one called @${esc(username)} here.</p></section>`; return; }
   body.innerHTML = `
+    <header class="app-head">
+      ${own ? `<span class="icon-btn"></span>` : `<button class="icon-btn" id="pgBack" aria-label="back">${ICON.back}</button>`}
+      <h2 class="ph">${esc(p.username)}</h2>
+      <button class="icon-btn dots-ic" id="profMenu" aria-label="more">•••</button>
+    </header>
     <section class="prof">
-      ${own ? "" : `<button class="icon back" id="pgBack">‹</button>`}
-      ${avatar(p, "xl")}
-      <h2>${esc(nameOf(p))}</h2>
-      <p class="muted">@${esc(p.username)}${p.follows_me && !own ? " · follows you" : ""}</p>
-      ${p.bio ? `<p class="bio">${esc(p.bio)}</p>` : ""}
-      <div class="stats"><span><b>${p.posts}</b>posts</span><span><b>${p.followers}</b>followers</span><span><b>${p.following}</b>following</span></div>
+      <div class="prof-top">
+        <span class="ring big">${avatar(p, "xl")}</span>
+        <div class="stats">
+          <span><b>${p.posts}</b>posts</span><span><b data-followers>${p.followers}</b>followers</span><span><b>${p.following}</b>following</span>
+        </div>
+      </div>
+      <p class="prof-name">${esc(p.display_name || p.username)}</p>
+      ${p.bio ? `<p class="bio">${linkify(p.bio)}</p>` : ""}
+      ${!own && p.follows_me ? `<p class="muted small">follows you</p>` : ""}
       <div class="prof-actions">
-        ${own ? `<button class="chip" id="editProf">edit profile</button><button class="chip" id="acctBtn">account</button>`
-              : `<button class="btn-primary small ${p.i_follow ? "ghost" : ""}" id="followBtn">${p.i_follow ? "following" : p.follows_me ? "follow back" : "follow"}</button><button class="chip" id="profMenu">•••</button>`}
+        ${own ? `<button class="btn-soft" id="editProf">edit profile</button><button class="btn-soft" id="shareProf">share profile</button>`
+              : `<button class="btn-soft ${p.i_follow ? "" : "primary"}" id="followBtn">${p.i_follow ? "following" : p.follows_me ? "follow back" : "follow"}</button><button class="btn-soft" id="shareProf">share profile</button>`}
       </div>
     </section>
-    ${own ? `<section class="activity"><h3>activity</h3><div id="actList">${loading()}</div></section>` : ""}
-    <section class="grid-posts"><h3>${own ? "your posts" : "posts"}</h3><div class="pgrid" id="pgrid">${loading()}</div></section>`;
+    <nav class="ptabs"><button class="on" data-pt="posts">${ICON.grid}</button><button data-pt="tagged">${ICON.tagged}</button></nav>
+    <div class="pgrid" id="pgrid">${loading()}</div>`;
   if (!own) $("#pgBack").onclick = () => history.back();
+  $("#shareProf").onclick = () => shareLink(`#@${p.username}`, `@${p.username} on magnet diary`);
   if (own) {
     $("#editProf").onclick = () => openProfileSheet(false, () => profilePage(D.S.me.username));
-    $("#acctBtn").onclick = () => D.openMenu();
-    loadActivity();
+    $("#profMenu").onclick = () => actions("account", [
+      { label: "activity", run: () => (location.hash = "#activity") },
+      { label: "account settings", run: () => D.openMenu() },
+    ]);
   } else {
     $("#followBtn").onclick = async () => {
       const b = $("#followBtn");
@@ -397,38 +596,36 @@ export async function profilePage(username, isMeTab = false) {
         if (p.i_follow) { await D.db.unfollow(D.S.user.id, p.id); p.i_follow = false; p.followers--; }
         else { await D.db.follow(D.S.user.id, p.id); p.i_follow = true; p.followers++; }
         b.textContent = p.i_follow ? "following" : "follow";
-        b.classList.toggle("ghost", p.i_follow);
-        body.querySelector(".stats span:nth-child(2) b").textContent = p.followers;
+        b.classList.toggle("primary", !p.i_follow);
+        body.querySelector("[data-followers]").textContent = p.followers;
       } catch { D.toast("couldn't update"); }
     };
-    $("#profMenu").onclick = () => actions(`@${p.username}`, [{ label: "report this profile", danger: true, run: () => reportMenu({ profile_id: p.id }, "profile") }]);
+    $("#profMenu").onclick = () => actions(`@${p.username}`, [
+      { label: "copy profile link", run: () => shareLink(`#@${p.username}`, `@${p.username}`) },
+      { label: "report this profile", danger: true, run: () => reportMenu({ profile_id: p.id }, "profile") },
+    ]);
   }
-  try {
-    const posts = await D.db.feed({ kind: "any", author: p.id, limit: 50 });
+  const showGrid = async (which) => {
+    body.querySelectorAll("[data-pt]").forEach((b) => b.classList.toggle("on", b.dataset.pt === which));
     const g = $("#pgrid");
-    g.innerHTML = posts.length
-      ? posts.map((x) => `<a class="pthumb" href="#p/${x.post_id}">${miniBoard(x.items, x.background, x.board_day || x.created_at.slice(0, 10))}</a>`).join("")
-      : `<p class="muted pad-s">${own ? "nothing posted yet. open a day and tap ↗ post." : "nothing to see yet."}</p>`;
-    afterRender(g);
-  } catch { $("#pgrid").innerHTML = `<p class="muted">couldn't load posts.</p>`; }
-}
-async function loadActivity() {
-  try {
-    const list = await D.db.activity();
-    const words = { follow: "started following you", magnet: "gave your board a magnet", comment: "commented:", invite: "added you to" };
-    $("#actList").innerHTML = list.length ? list.map((a) => {
-      const href = a.kind === "follow" ? `#@${a.username}` : a.kind === "invite" ? `#b/${a.board_id}` : `#p/${a.post_id}`;
-      const extra = a.kind === "comment" ? ` “${esc(a.body)}”` : a.kind === "invite" ? ` <b>${esc(a.body || "a memory board")}</b>` : "";
-      return `<a class="act-row" href="${esc(href)}">${avatar(a, "s")}<span><b>${esc(a.username || nameOf(a))}</b> ${words[a.kind]}${extra}<small>${ago(a.at)}</small></span></a>`;
-    }).join("") : `<p class="muted pad-s">nothing yet. when people follow you, comment or add you to a board, it shows up here.</p>`;
-  } catch { $("#actList").innerHTML = `<p class="muted">couldn't load activity.</p>`; }
+    g.innerHTML = loading();
+    try {
+      const posts = which === "tagged" ? await D.db.feed({ kind: "any", tagged: p.id, limit: 60 }) : await D.db.feed({ kind: "any", author: p.id, limit: 60 });
+      g.innerHTML = posts.length
+        ? posts.map((x) => `<a class="pthumb" href="#p/${x.post_id}">${miniBoard(x.items, x.background, postDate(x))}${x.board_kind === "shared" ? `<span class="pbadge">❀</span>` : ""}</a>`).join("")
+        : `<section class="empty-page small grid-empty"><p>${which === "tagged" ? (own ? "when friends tag you in a board, it shows up here." : "no tagged boards yet.") : own ? "share your first board: open a day and tap ↗ post." : "no posts yet."}</p></section>`;
+      afterRender(g);
+    } catch { g.innerHTML = `<p class="muted">couldn't load posts.</p>`; }
+  };
+  body.querySelectorAll("[data-pt]").forEach((b) => (b.onclick = () => showGrid(b.dataset.pt)));
+  showGrid("posts");
 }
 
 // ---------------- together (shared boards) ----------------
 export async function togetherPage() {
   if (!(await ensureUsername(() => togetherPage()))) return;
   const el = page(`
-    <header class="page-head"><h2>together</h2></header>
+    <header class="app-head"><span class="icon-btn"></span><h2 class="ph">together</h2><span class="icon-btn"></span></header>
     <p class="muted page-sub">memory boards you make with friends. everyone on a board can add photos, notes and stickers, live.</p>
     <form class="new-board" id="newBoard"><input id="nbTitle" class="field" maxlength="80" placeholder="name a new board, e.g. beach trip '26"><button class="btn-primary small">create</button></form>
     <div class="tlist" id="tlist">${loading()}</div>`, "together");

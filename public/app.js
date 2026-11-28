@@ -202,6 +202,7 @@ async function boot() {
   $("#auth").hidden = true;
   $("#app").hidden = false;
   renderTitle();
+  community.renderMeTab();
   booted = true;
   await route();
 }
@@ -216,8 +217,9 @@ async function route() {
   if (/^\d{4}-\d{2}-\d{2}$/.test(h)) return openDay(h);
   if (h === "" || h === "today") return openDay(today());
   if (h.startsWith("b/")) return openBoard(h.slice(2));
-  if (h === "feed" || h === "following") return community.feedPage("following");
-  if (h === "explore") return community.feedPage("explore");
+  if (h === "feed" || h === "following" || h === "home") return community.feedPage();
+  if (h === "explore" || h === "search") return community.explorePage();
+  if (h === "activity") return community.activityPage();
   if (h === "together") return community.togetherPage();
   if (h === "me") return community.mePage();
   if (h.startsWith("@")) return community.profilePage(h.slice(1).toLowerCase());
@@ -233,6 +235,7 @@ function setView(kind, tab) {
   const isDay = onBoard && S.ctx?.kind === "day";
   $("#stage").hidden = !onBoard;
   $("#page").hidden = onBoard;
+  document.querySelector("header.top").hidden = !onBoard;
   document.querySelector(".dock").hidden = !onBoard;
   $("#status").hidden = !onBoard;
   $("#daysBtn").hidden = !isDay;
