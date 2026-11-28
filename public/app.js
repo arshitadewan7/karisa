@@ -913,6 +913,7 @@ $("#mainBar").addEventListener("click", (e) => {
   if (!b) return;
   const a = b.dataset.act;
   if (a === "add") openAdd();
+  if (a === "snap") return openCam();
   if (a === "post") community.openPostSheet();
   if (a === "story") community.storyForCurrentBoard();
   if (a === "people") community.openPeople();
@@ -991,6 +992,142 @@ $("#fileIn").addEventListener("change", async (e) => {
   }
   toast(files.length > 1 ? `${files.length} photos pinned` : "photo pinned");
 });
+
+// ---------------- quick snap ----------------
+// the camera opens inside the app; one tap and the photo lands on the board
+const cam = { stream: null, facing: "environment", dual: false, busy: false };
+if (!CanvasRenderingContext2D.prototype.roundRect) CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h) { this.rect(x, y, w, h); };
+const timeLabel = (d = new Date()) => d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase().replace(/\s/g, " ");
+async function openCam() {
+  if (!navigator.mediaDevices?.getUserMedia) return $("#snapIn").click();
+  try { cam.dual = localStorage.getItem("snapDual") === "1"; } catch {}
+  $("#camDual").setAttribute("aria-pressed", cam.dual);
+  $("#camInset").hidden = true;
+  $("#camHint").textContent = cam.dual ? "tap to snap. then a quick one of you" : "tap to snap. it goes straight on the board";
+  $("#camTime").textContent = timeLabel();
+  $("#cam").hidden = false;
+  document.body.classList.add("cam-open");
+  try { await startCam(cam.facing); }
+  catch (e) {
+    closeCam();
+    toast(e.name === "NotAllowedError" ? "camera is blocked. using your phone camera instead" : "couldn't open the camera", null, null, 2500);
+    $("#snapIn").click();
+  }
+}
+async function startCam(facing) {
+  stopCam();
+  cam.facing = facing;
+  const v = $("#camVideo");
+  cam.stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1920 } }, audio: false,
+  });
+  v.srcObject = cam.stream;
+  v.classList.toggle("mirror", facing === "user");
+  await v.play().catch(() => {});
+  if (!v.videoWidth) await new Promise((r) => { v.onloadeddata = r; setTimeout(r, 2000); });
+}
+function stopCam() {
+  cam.stream?.getTracks().forEach((t) => t.stop());
+  cam.stream = null;
+}
+function closeCam() {
+  stopCam();
+  $("#camVideo").srcObject = null;
+  $("#cam").hidden = true;
+  document.body.classList.remove("cam-open");
+  cam.busy = false;
+}
+// what the viewfinder shows (cropped to 4:5, mirrored for selfies)
+function grabFrame(maxSide = 1600) {
+  const v = $("#camVideo");
+  const vw = v.videoWidth, vh = v.videoHeight;
+  if (!vw) throw new Error("camera isn't ready");
+  const ar = 4 / 5;
+  let sw = vw, sh = vw / ar;
+  if (sh > vh) { sh = vh; sw = vh * ar; }
+  const s = Math.min(1, maxSide / Math.max(sw, sh));
+  const c = document.createElement("canvas");
+  c.width = Math.round(sw * s); c.height = Math.round(sh * s);
+  const ctx = c.getContext("2d");
+  if (cam.facing === "user") { ctx.translate(c.width, 0); ctx.scale(-1, 1); }
+  ctx.drawImage(v, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, c.width, c.height);
+  return c;
+}
+function flash() {
+  const f = $("#camFlash");
+  f.classList.remove("go"); void f.offsetWidth; f.classList.add("go");
+  navigator.vibrate?.(20);
+}
+$("#camClose").onclick = closeCam;
+$("#camFlip").onclick = () => { if (!cam.busy) startCam(cam.facing === "user" ? "environment" : "user").catch(() => toast("couldn't switch camera")); };
+$("#camDual").onclick = () => {
+  cam.dual = !cam.dual;
+  $("#camDual").setAttribute("aria-pressed", cam.dual);
+  $("#camHint").textContent = cam.dual ? "tap to snap. then a quick one of you" : "tap to snap. it goes straight on the board";
+  try { localStorage.setItem("snapDual", cam.dual ? "1" : "0"); } catch {}
+};
+$("#camShutter").onclick = async () => {
+  if (cam.busy) return;
+  cam.busy = true;
+  try {
+    flash();
+    const main = grabFrame();
+    if (cam.dual) {
+      // freeze the first shot, flip around, count down, take the second
+      const inset = $("#camInset");
+      inset.width = main.width; inset.height = main.height;
+      inset.getContext("2d").drawImage(main, 0, 0);
+      inset.classList.add("full"); inset.hidden = false;
+      $("#camHint").textContent = "now you…";
+      const other = cam.facing === "user" ? "environment" : "user";
+      try {
+        await startCam(other);
+        inset.classList.remove("full");
+        const cnt = $("#camCount");
+        for (const n of [3, 2, 1]) { cnt.textContent = n; cnt.hidden = false; await new Promise((r) => setTimeout(r, 650)); }
+        cnt.hidden = true;
+        flash();
+        const small = grabFrame(700);
+        const ctx = main.getContext("2d");
+        const iw = Math.round(main.width * 0.32), ih = Math.round((iw * small.height) / small.width);
+        const pad = Math.round(main.width * 0.035), r = Math.round(iw * 0.12), bw = Math.max(3, Math.round(main.width * 0.008));
+        ctx.save();
+        ctx.beginPath(); ctx.roundRect(pad - bw, pad - bw, iw + bw * 2, ih + bw * 2, r + bw); ctx.fillStyle = "#111"; ctx.fill();
+        ctx.beginPath(); ctx.roundRect(pad, pad, iw, ih, r); ctx.clip();
+        ctx.drawImage(small, pad, pad, iw, ih);
+        ctx.restore();
+        cam.facing = other === "user" ? "environment" : "user"; // next time opens the main camera again
+      } catch { /* only one camera: keep the single photo */ }
+    }
+    const blob = await new Promise((r) => main.toBlob(r, "image/jpeg", 0.88));
+    await new Promise((r) => setTimeout(r, 220));
+    closeCam();
+    await pinSnap(blob, main.height / main.width);
+  } catch (e) {
+    cam.busy = false;
+    toast(e.message || "couldn't take that");
+  }
+};
+$("#snapIn").addEventListener("change", async (e) => {
+  const f = e.target.files[0];
+  e.target.value = "";
+  if (f) pinSnap(f);
+});
+async function pinSnap(blob, aspectHint) {
+  toast("developing…", null, null, 60000);
+  try {
+    const { id, aspect } = await uploadPhoto(blob);
+    const iw = rand(250, 300);
+    const p = spot(iw, iw * 1.3);
+    const it = addItem({ id: uid(), type: "photo", photo: id, aspect: aspect || aspectHint, style: "polaroid", bw: false,
+      caption: timeLabel(), font: "caveat", pin: "magnet", pinX: rand(-12, 12), pinR: rand(-8, 8), x: p.x, y: p.y, w: iw, rot: rand(-7, 7) });
+    const el = S.els.get(it.id);
+    if (el) { el.classList.add("drop"); setTimeout(() => el.classList.remove("drop"), 900); }
+    toast("snapped and pinned");
+  } catch (err) {
+    if (err.message !== "signed out") toast(`couldn't add that photo (${err.message})`);
+  }
+}
 
 // ---------------- live photos ----------------
 // keeps the first 3 seconds, shrinks it to ~540px and re-encodes it so it stays small
